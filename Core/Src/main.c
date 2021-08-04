@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
 #include "string.h"
+#include "stdlib.h"
 #include "dwt_stm32_delay.h"	//gto
 /* USER CODE END Includes */
 
@@ -81,6 +82,10 @@ static void MX_NVIC_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 //gto
+//char *gto_substr(int s, int e, char *str);
+void Sync_out();
+char *SubStr( char *pnInput, int nStart, int nLen );
+
 #define SYNC_GEN	GPIO_PIN_0
 #define DOWN_EN		GPIO_PIN_9
 #define GPIO_A		GPIO_PIN_5
@@ -100,6 +105,7 @@ uint8_t rx_data5[10] = "uart5\r\n";
 uint8_t rx_data4[10] = "uart4\r\n";
 uint8_t data[1] = "S";
 uint8_t sync_Signal = 0xff;
+uint8_t test = 0x11;
 uint8_t uart2_Signal = 0x00;
 
 uint8_t rx_data;
@@ -114,18 +120,21 @@ int binary[20];
 char master_Name[2];
 
 
-#define   START_CODE	 '['
-#define   END_CODE		 ']'
+#define   START_CODE	 	'['
+#define   END_CODE		 	']'
 #define   START				1
 #define   PAYLOAD 			2
 #define   END    			3
-#define   LENGTH   			36
+#define   LENGTH   			35
 uint8_t   rxd[40];
 uint8_t   status = START;
 uint8_t   rx_cnt;
 uint8_t   rxdata;
 
 uint8_t   data_receive_flag = 0;
+
+char 	compare_CMD[28] = "[FID=XX SLAVE ANCHOR DEVICE]";
+char* 	reset_CMD;
 
 /*uart interrupt test*/ //gto
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
@@ -262,7 +271,7 @@ int main(void)
   HAL_UART_Receive_IT(&huart2, (uint8_t *) &data, 1); // interrupt uart 2
   //HAL_UART_Transmit(&huart1, start_data, 17, 10);
   //debugPrintln(&huart1, "\n Start STM32F407");
-  printf("\n Start STM32F407\r\n");
+  printf("\r\n Start STM32F407 - 20210804\r\n");
   /*
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, 1); // GPIO PC1 OUTPUT HIGH
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, 0); // GPIO PB9 OUTPUT LOW
@@ -277,9 +286,12 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 
   //HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, 1); // GPIO PC1 OUTPUT HIGH -> tx enable
-  HAL_GPIO_WritePin(GPIOB, DOWN_EN, 0); // GPIO PB9 OUTPUT LOW -> Down enable
-  HAL_GPIO_WritePin(GPIOE, SYNC_GEN, 0); // SYNC_GEN LOW
-  HAL_GPIO_WritePin(GPIOC, TX_EN, 1);								// GPIO PC1 OUTPUT HIGH -> tx enable
+  HAL_GPIO_WritePin(GPIOB, DOWN_EN, 0); 	// GPIO PB9 OUTPUT LOW -> Down enable
+  HAL_GPIO_WritePin(GPIOE, SYNC_GEN, 0); 	// SYNC_GEN LOW
+
+  HAL_GPIO_WritePin(GPIOC, TX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> tx enable
+  HAL_GPIO_WritePin(GPIOC, RX_EN, 0);		// GPIO PC1 OUTPUT LOW -> rx enable
+  //HAL_GPIO_WritePin(GPIOC, RX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> rx enable
 
 
   while (1)
@@ -301,6 +313,8 @@ int main(void)
 	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_0, 0);						// GPIO PE0 OUTPUT LOW -> SYNC_GEN
 
 	  HAL_Delay(1000);	// 1 second*/
+
+	  HAL_UART_Transmit(&huart6, (uint8_t *) &test, 1, 10);		//4mbps test
 
 	  if (uart1_key_Flag){
 		  uart1_key_Flag = 0;
@@ -346,11 +360,21 @@ int main(void)
 
 			  case 'z':
 				  //HAL_UART_Transmit(&huart2, (uint8_t *) &data, 1, 10);
-				  HAL_UART_Transmit(&huart2, (uint8_t *) "[ID=0101 SLAVE ANCHOR RE-SET DEVICE]", 36, 100);
+				  //HAL_GPIO_WritePin(GPIOC, TX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> tx enable
+				  //HAL_GPIO_WritePin(GPIOC, RX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> rx enable
+				  HAL_UART_Transmit(&huart2, (uint8_t *) "[RID=00 407 TO SLAVE ANCHOR DEVICE]", 35, 100);
+				  //HAL_GPIO_WritePin(GPIOC, TX_EN, 0);		// GPIO PC1 OUTPUT LOW -> tx enable
+				  //HAL_GPIO_WritePin(GPIOC, RX_EN, 0);		// GPIO PC1 OUTPUT LOW -> rx enable
 
 				  /*if(uart2_key_Flag){
 					  printf("PIC Received\r\n");
 				  }*/
+
+
+				  break;
+
+			  case 'x':
+				  HAL_UART_Transmit(&huart2, (uint8_t *) "[RID=01 407 TO SLAVE ANCHOR DEVICE]", 35, 100);
 
 				  break;
 
@@ -366,9 +390,13 @@ int main(void)
 		  //HAL_UART_Transmit(&huart6, (uint8_t *) &uart2_Signal, 1, 10);				// send data(0x00)
 		  //HAL_UART_Receive_IT(&huart2, &data, 1); // interrupt uart 2
 
+		  reset_CMD = SubStr(rxd, 0, 35);
+		  printf("substring %s\r\n", reset_CMD);
+
 		  for (int i = 0; i < LENGTH; i++) {
-			  HAL_UART_Transmit(&huart1, (uint8_t *) &rxd[i], 1, 10);				// send data(0x00)
+			  HAL_UART_Transmit(&huart1, (uint8_t *) &rxd[i], 1, 10);
 		  }
+
 	  }
 
 
@@ -450,6 +478,8 @@ int main(void)
 
   /* USER CODE END 3 */
 }
+
+
 
 /**
   * @brief System Clock Configuration
@@ -990,6 +1020,8 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/*##########################################################################################################*/
+/*gto*/
 /* Synchronization Function */
 
 void Sync_out(){
@@ -1002,6 +1034,34 @@ void Sync_out(){
 	HAL_GPIO_WritePin(GPIOC, TX_EN, 0);								// GPIO PC1 OUTPUT LOW -> tx enable
 	HAL_GPIO_WritePin(GPIOE, SYNC_GEN, 0);							// GPIO PE0 OUTPUT LOW -> SYNC_GEN
 }
+/*##########################################################################################################*/
+
+/*##########################################################################################################*/
+/*gto*/
+/* make a Substring function */
+
+char *SubStr( char *pnInput, int nStart, int nLen )
+{
+    int nLoop ;
+    int nLength ;
+    char *pszOutPut ;
+
+    if( pnInput == NULL ){
+        return NULL ;
+    }
+    pszOutPut = (char *)malloc( sizeof(char) * nLen + 1 ) ;
+    nLength = strlen( pnInput ) ;
+    if( nLength > nStart + nLen ){
+        nLength = nStart + nLen ;
+    }
+    for( nLoop = nStart ; nLoop < nLength ; nLoop++ ){
+        pszOutPut[nLoop-nStart] = pnInput[nLoop] ;
+    }
+    pszOutPut[nLoop - nStart] = '\0' ;
+    return pszOutPut ;
+}
+/*##########################################################################################################*/
+
 
 /* USER CODE END 4 */
 
