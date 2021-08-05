@@ -107,6 +107,7 @@ uint8_t data[1] = "S";
 uint8_t sync_Signal = 0xff;
 uint8_t test = 0x11;
 uint8_t uart2_Signal = 0x00;
+uint8_t uart6_Signal = 0x11;
 
 uint8_t rx_data;
 uint8_t uart1_key_Flag = 0;
@@ -149,11 +150,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 
 	}
 
-	/*if (huart->Instance == USART6) {
-		HAL_UART_Receive_IT(&huart6, (uint8_t *) &data, 1);
-		printf("received uart6 interrupt! \r\n");
-	}*/
-
 	if (huart->Instance == USART2) {
 		//uart2_key_Flag = 1;
 		//debugPrintln(&huart1, "uart2 interrupt! ");
@@ -193,7 +189,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 		        }
 		        break ;
 		}
+	}
 
+	if (huart->Instance == USART6) {
+		HAL_UART_Receive_IT(&huart6, (uint8_t *) &data, 1);
+		printf("received uart6 interrupt! \r\n");
 	}
 }
 
@@ -314,7 +314,7 @@ int main(void)
 
 	  HAL_Delay(1000);	// 1 second*/
 
-	  HAL_UART_Transmit(&huart6, (uint8_t *) &test, 1, 10);		//4mbps test
+	  //HAL_UART_Transmit(&huart6, (uint8_t *) &test, 1, 10);		//4mbps test
 
 	  if (uart1_key_Flag){
 		  uart1_key_Flag = 0;
@@ -354,7 +354,7 @@ int main(void)
 
 			  case 't':
 				  //HAL_UART_Transmit(&huart2, (uint8_t *) &uart2_Signal, 1, 10);	// send data(0x00)
-				  HAL_UART_Transmit(&huart6, (uint8_t *) &uart2_Signal, 1, 10);		// send data(0x00)
+				  HAL_UART_Transmit(&huart6, (uint8_t *) &uart6_Signal, 1, 10);				// send data(0x00)
 
 				  break;
 
@@ -375,6 +375,10 @@ int main(void)
 
 			  case 'x':
 				  HAL_UART_Transmit(&huart2, (uint8_t *) "[RID=01 407 TO SLAVE ANCHOR DEVICE]", 35, 100);
+				  break;
+
+			  case 'c':
+				  HAL_UART_Transmit(&huart2, (uint8_t *) "[RID=08 407 TO SLAVE ANCHOR DEVICE]", 35, 100);
 
 				  break;
 
