@@ -109,6 +109,7 @@ uint8_t test = 0x11;
 uint8_t uart2_Signal = 0x00;
 uint8_t uart6_Signal = 0x11;
 
+uint8_t from105_00[5] = "10500";
 uint8_t rx_data;
 uint8_t uart1_key_Flag = 0;
 uint8_t uart2_key_Flag = 0;
@@ -117,6 +118,9 @@ uint8_t id_1, id_2, id_3, id_4;
 int deci1,deci2,deci3,deci4;
 int result_bin;
 int binary[20];
+
+uint8_t recv_array[5];
+uint8_t recv_cnt = 0;
 
 char master_Name[2];
 
@@ -132,7 +136,23 @@ uint8_t   status = START;
 uint8_t   rx_cnt;
 uint8_t   rxdata;
 
+#define   GTO_START_CODE	 	'('
+#define   GTO_END_CODE		 	')'
+#define   GTO_START				1
+#define   GTO_PAYLOAD 			2
+#define   GTO_END    			3
+#define   GTO_LENGTH   			5
+uint8_t   GTO_rxd[40];
+uint8_t   GTO_status = GTO_START;
+uint8_t   GTO_rx_cnt;
+uint8_t   GTO_rxdata;
+
+
+
+
 uint8_t   data_receive_flag = 0;
+
+uint8_t   uart_6_flag = 0;
 
 char 	compare_CMD[28] = "[FID=XX SLAVE ANCHOR DEVICE]";
 char* 	reset_CMD;
@@ -142,10 +162,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	if (huart->Instance == USART1) {
 			//debugPrintln(&huart1, "uart1 interrupt! ");
 	        // When one data is received, an interrupt is generated.
+
 			HAL_UART_Receive_IT(&huart1, &rx_data, 1);
 
 	        // Send the received data.
+
 			HAL_UART_Transmit(&huart1, &rx_data, 1, 10);
+
 			uart1_key_Flag = 1;
 
 	}
@@ -192,8 +215,46 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 	}
 
 	if (huart->Instance == USART6) {
-		HAL_UART_Receive_IT(&huart6, (uint8_t *) &data, 1);
-		printf("received uart6 interrupt! \r\n");
+
+		//uart_6_flag = 1;
+
+		HAL_UART_Receive_IT(&huart6, (uint8_t *) &GTO_rxdata, 1);
+
+		switch(GTO_status){
+
+				case GTO_START:
+					if( GTO_rxdata == GTO_START_CODE ) {
+						GTO_rxd[0] = GTO_START_CODE ;
+						GTO_rx_cnt = 1 ;
+						GTO_status = GTO_PAYLOAD ;
+						uart_6_flag = 0 ;
+					}
+					break ;
+
+				case GTO_PAYLOAD :
+					if( GTO_rxdata == GTO_START_CODE ) {
+						GTO_rxd[0] = GTO_START_CODE ;
+						GTO_rx_cnt = 1 ;
+						GTO_status = GTO_PAYLOAD ;
+					}
+					else if( GTO_rxdata == GTO_END_CODE ) {
+						if( GTO_rx_cnt == (GTO_LENGTH-1) )  {
+							GTO_rxd[GTO_rx_cnt++] = GTO_rxdata ;
+							uart_6_flag = 1 ;
+						}
+						GTO_status = GTO_START ;
+					}
+					else{
+						if( GTO_rx_cnt < (GTO_LENGTH+2) )  GTO_rxd[GTO_rx_cnt++] = GTO_rxdata ;
+						else {
+							GTO_status = GTO_START ;
+							GTO_rx_cnt = 0 ;
+							uart_6_flag = 0 ;
+						}
+					}
+					break ;
+		}
+
 	}
 }
 
@@ -269,6 +330,7 @@ int main(void)
   //gto
   HAL_UART_Receive_IT(&huart1, &rx_data, 1);
   HAL_UART_Receive_IT(&huart2, (uint8_t *) &data, 1); // interrupt uart 2
+  HAL_UART_Receive_IT(&huart6, (uint8_t *) &GTO_rxdata, 1); // interrupt uart 6
   //HAL_UART_Transmit(&huart1, start_data, 17, 10);
   //debugPrintln(&huart1, "\n Start STM32F407");
   printf("\r\n Start STM32F407 - 20210804\r\n");
@@ -291,6 +353,7 @@ int main(void)
 
   HAL_GPIO_WritePin(GPIOC, TX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> tx enable
   HAL_GPIO_WritePin(GPIOC, RX_EN, 0);		// GPIO PC1 OUTPUT LOW -> rx enable
+
   //HAL_GPIO_WritePin(GPIOC, RX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> rx enable
 
 
@@ -346,6 +409,7 @@ int main(void)
 
 			  case 'r':
 				  //HAL_GPIO_WritePin(GPIOC, TX_EN, 1);								// GPIO PC1 OUTPUT HIGH -> tx enable
+
 				  HAL_UART_Transmit(&huart2, (uint8_t *) data, 1, 10);				// send data(0x00)
 
 				  //HAL_UART_Transmit(&huart6, (uint8_t *) &uart2_Signal, 1, 10);	// send data(0x00)
@@ -354,7 +418,8 @@ int main(void)
 
 			  case 't':
 				  //HAL_UART_Transmit(&huart2, (uint8_t *) &uart2_Signal, 1, 10);	// send data(0x00)
-				  HAL_UART_Transmit(&huart6, (uint8_t *) &uart6_Signal, 1, 10);				// send data(0x00)
+
+				  HAL_UART_Transmit(&huart6, (uint8_t *) &uart6_Signal, 1, 10);		// send data(0x00)
 
 				  break;
 
@@ -362,7 +427,9 @@ int main(void)
 				  //HAL_UART_Transmit(&huart2, (uint8_t *) &data, 1, 10);
 				  //HAL_GPIO_WritePin(GPIOC, TX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> tx enable
 				  //HAL_GPIO_WritePin(GPIOC, RX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> rx enable
+
 				  HAL_UART_Transmit(&huart2, (uint8_t *) "[RID=00 407 TO SLAVE ANCHOR DEVICE]", 35, 100);
+
 				  //HAL_GPIO_WritePin(GPIOC, TX_EN, 0);		// GPIO PC1 OUTPUT LOW -> tx enable
 				  //HAL_GPIO_WritePin(GPIOC, RX_EN, 0);		// GPIO PC1 OUTPUT LOW -> rx enable
 
@@ -397,9 +464,24 @@ int main(void)
 		  reset_CMD = SubStr(rxd, 0, 35);
 		  printf("substring %s\r\n", reset_CMD);
 
+		  HAL_Delay(1);
 		  for (int i = 0; i < LENGTH; i++) {
 			  HAL_UART_Transmit(&huart1, (uint8_t *) &rxd[i], 1, 10);
 		  }
+
+	  }
+
+	  if(uart_6_flag) {
+		  uart_6_flag = 0;
+
+		  printf("Received 105 Data \r\n");
+
+		  HAL_Delay(1);
+
+		  for (int i = 0; i < GTO_LENGTH; i++) {
+			  HAL_UART_Transmit(&huart1, (uint8_t *) &GTO_rxd[i], 1, 10);
+		  }
+		  //printf("\r\n\r\n");
 
 	  }
 
