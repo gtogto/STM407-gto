@@ -3,6 +3,7 @@
 	<name>STM407-gto</name>
 	<comment></comment>
 	<projects>
+		<project>STM407-407VE</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

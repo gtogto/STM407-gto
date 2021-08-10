@@ -12,6 +12,21 @@ RM := rm -rf
 -include Drivers/STM32F4xx_HAL_Driver/Src/subdir.mk
 -include Core/Startup/subdir.mk
 -include Core/Src/subdir.mk
+-include Core/Internet/httpServer/subdir.mk
+-include Core/Internet/TFTP/subdir.mk
+-include Core/Internet/SNTP/subdir.mk
+-include Core/Internet/SNMP/subdir.mk
+-include Core/Internet/MQTT/MQTTPacket/src/subdir.mk
+-include Core/Internet/MQTT/subdir.mk
+-include Core/Internet/FTPServer/subdir.mk
+-include Core/Internet/FTPClient/subdir.mk
+-include Core/Internet/DNS/subdir.mk
+-include Core/Internet/DHCP/subdir.mk
+-include Core/Ethernet/W5500/subdir.mk
+-include Core/Ethernet/W5300/subdir.mk
+-include Core/Ethernet/W5200/subdir.mk
+-include Core/Ethernet/W5100/subdir.mk
+-include Core/Ethernet/subdir.mk
 -include subdir.mk
 -include objects.mk
 

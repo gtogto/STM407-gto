@@ -26,6 +26,7 @@
 #include "string.h"
 #include "stdlib.h"
 #include "dwt_stm32_delay.h"	//gto
+#include "dhcp.h"				//gto
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -141,7 +142,7 @@ uint8_t   rxdata;
 #define   GTO_START				1
 #define   GTO_PAYLOAD 			2
 #define   GTO_END    			3
-#define   GTO_LENGTH   			5
+#define   GTO_LENGTH   			11
 uint8_t   GTO_rxd[40];
 uint8_t   GTO_status = GTO_START;
 uint8_t   GTO_rx_cnt;
@@ -156,6 +157,13 @@ uint8_t   uart_6_flag = 0;
 
 char 	compare_CMD[28] = "[FID=XX SLAVE ANCHOR DEVICE]";
 char* 	reset_CMD;
+
+/*##########################################################################################################*/
+/* Ethernet */
+static uint16_t wizDHCPticks = 0;
+
+
+/*##########################################################################################################*/
 
 /*uart interrupt test*/ //gto
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
@@ -333,7 +341,7 @@ int main(void)
   HAL_UART_Receive_IT(&huart6, (uint8_t *) &GTO_rxdata, 1); // interrupt uart 6
   //HAL_UART_Transmit(&huart1, start_data, 17, 10);
   //debugPrintln(&huart1, "\n Start STM32F407");
-  printf("\r\n Start STM32F407 - 20210804\r\n");
+  printf("\r\n Start STM32F407 - 20210810\r\n");
   /*
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, 1); // GPIO PC1 OUTPUT HIGH
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, 0); // GPIO PB9 OUTPUT LOW
@@ -565,8 +573,6 @@ int main(void)
   /* USER CODE END 3 */
 }
 
-
-
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -718,7 +724,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -1070,12 +1076,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
   /*Configure GPIO pins : PB12 PB13 PB14 PB15 */
   GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -1148,8 +1148,35 @@ char *SubStr( char *pnInput, int nStart, int nLen )
 }
 /*##########################################################################################################*/
 
-
 /* USER CODE END 4 */
+
+ /**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM6 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM6) {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+  if(htim->Instance == TIM6) {
+	  wizDHCPticks++;
+	  if(wizDHCPticks >= 1000)
+	  {
+		  wizDHCPticks = 0;
+		  DHCP_time_handler();
+	  }
+  }
+  /* USER CODE END Callback 1 */
+}
 
 /**
   * @brief  This function is executed in case of error occurrence.
