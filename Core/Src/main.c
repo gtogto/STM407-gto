@@ -26,7 +26,12 @@
 #include "string.h"
 #include "stdlib.h"
 #include "dwt_stm32_delay.h"	//gto
+
 #include "dhcp.h"				//gto
+#include "w5100.h"				//gto
+#include "wizchip_conf.h"		//gto
+#include "socket.h"				//gto
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -47,6 +52,8 @@
 RTC_HandleTypeDef hrtc;
 
 SPI_HandleTypeDef hspi1;
+DMA_HandleTypeDef hdma_spi1_tx;
+DMA_HandleTypeDef hdma_spi1_rx;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim7;
@@ -65,6 +72,7 @@ UART_HandleTypeDef huart6;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_UART4_Init(void);
@@ -92,6 +100,14 @@ char *SubStr( char *pnInput, int nStart, int nLen );
 #define GPIO_A		GPIO_PIN_5
 #define TX_EN		GPIO_PIN_1
 #define RX_EN		GPIO_PIN_3
+
+//ETHERNET (W5100) -gto
+#define E_INT		GPIO_PIN_7
+#define E_RST		GPIO_PIN_4
+#define E_SCLK		GPIO_PIN_5
+#define E_MOSI		GPIO_PIN_7
+#define E_MISO		GPIO_PIN_6
+
 
 //gto
 /*ID*/
@@ -160,7 +176,51 @@ char* 	reset_CMD;
 
 /*##########################################################################################################*/
 /* Ethernet */
+void DisplayConfig(void);
+
+#define IINCHIP_READ(ADDR)                WIZCHIP_READ(ADDR)               ///< The defined for legacy chip driver
+#define GAR0           0x0001
+#define SUBR0          0x0005
+#define SHAR0          0x0009
+#define SIPR0          0x000F
+
+#define SOCK_ESTABLISHED    0x17
+#define SOCK_CLOSE_WAIT     0x1C
+#define SOCK_CLOSED			0x00
+
 static uint16_t wizDHCPticks = 0;
+
+#define MY_NET_MAC		{0x00, 0x08, 0xdc, 0x00, 0x00, 0x00}	// MY Mac Address : 00.08.DC.00.00.00
+
+#define MY_NET_GWIP		{192, 168, 0, 1}	 					//Gateway     : 192.168.0.1
+#define MY_SOURCEIP		{192, 168, 0, 101} 						//407 IP      : 192.168.0.101
+#define MY_SUBNET		{255, 255, 255, 0}
+
+#define MY_LISTEN_PORT  5000  									//Server Port : 5000
+
+#define TX_RX_MAX_BUF_SIZE	1024
+
+#define SOCK_TCPS			0
+#define MY_NET_MEMALLOC	0x55									// MY iinchip memory allocation
+
+unsigned char m_SokStatus1 = 2;
+
+
+#define setSHAR(shar) \
+		WIZCHIP_WRITE_BUF(SHAR, shar, 6)
+
+#define getGAR(gar) \
+		WIZCHIP_READ_BUF(GAR,gar,4)
+
+#define setSUBR(subr) \
+      WIZCHIP_WRITE_BUF(SUBR,subr,4)
+
+
+#define setSIPR(sipr) \
+		WIZCHIP_WRITE_BUF(SIPR, sipr, 4)
+
+#define setMR(mr) \
+	WIZCHIP_WRITE(MR,mr)
 
 
 /*##########################################################################################################*/
@@ -321,6 +381,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_USART1_UART_Init();
   MX_UART4_Init();
@@ -341,7 +402,18 @@ int main(void)
   HAL_UART_Receive_IT(&huart6, (uint8_t *) &GTO_rxdata, 1); // interrupt uart 6
   //HAL_UART_Transmit(&huart1, start_data, 17, 10);
   //debugPrintln(&huart1, "\n Start STM32F407");
-  printf("\r\n Start STM32F407 - 20210810\r\n");
+
+  /*##########################################################################################################*/
+  /*START DEBUGGING MESSAGE*/
+
+  printf("\r\n Start STM32F407 - 20210811 \r\n");
+
+  NetInit();
+  DisplayConfig();
+
+  /*END DEBUGGING MESSAGE*/
+  /*##########################################################################################################*/
+
   /*
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, 1); // GPIO PC1 OUTPUT HIGH
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9, 0); // GPIO PB9 OUTPUT LOW
@@ -364,9 +436,16 @@ int main(void)
 
   //HAL_GPIO_WritePin(GPIOC, RX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> rx enable
 
+  HAL_GPIO_WritePin(GPIOC, E_RST, 1);
+  //HAL_GPIO_WritePin(GPIOC, E_RST, 0);
 
   while (1)
   {
+	  //HAL_SPI_Transmit(&hspi1, (uint8_t *) &test, 1, 10);
+	  //HAL_SPI_Transmit_DMA(&hspi1, (uint8_t *) &test, 1);
+	  //HAL_Delay(1);
+	  //DWT_Delay_us(1000);											// 10 microsecond
+
 	  /*
 	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_0, 1);	// GPIO PE0 OUTPUT High -> SYNC_GEN
 	  HAL_UART_Transmit(&huart6, (uint8_t *) &test, 1, 10);
@@ -386,6 +465,8 @@ int main(void)
 	  HAL_Delay(1000);	// 1 second*/
 
 	  //HAL_UART_Transmit(&huart6, (uint8_t *) &test, 1, 10);		//4mbps test
+
+	  ProcessTcpSever();	// Ethernet test
 
 	  if (uart1_key_Flag){
 		  uart1_key_Flag = 0;
@@ -472,7 +553,7 @@ int main(void)
 		  reset_CMD = SubStr(rxd, 0, 35);
 		  printf("substring %s\r\n", reset_CMD);
 
-		  HAL_Delay(1);
+		  //HAL_Delay(1);
 		  for (int i = 0; i < LENGTH; i++) {
 			  HAL_UART_Transmit(&huart1, (uint8_t *) &rxd[i], 1, 10);
 		  }
@@ -484,7 +565,7 @@ int main(void)
 
 		  printf("Received 105 Data \r\n");
 
-		  HAL_Delay(1);
+		  //HAL_Delay(1);
 
 		  for (int i = 0; i < GTO_LENGTH; i++) {
 			  HAL_UART_Transmit(&huart1, (uint8_t *) &GTO_rxd[i], 1, 10);
@@ -734,7 +815,20 @@ static void MX_SPI1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN SPI1_Init 2 */
+  /*Configure GPIO pins : PC1 PC3 PC4 */
+  /**SPI2 GPIO Configuration
+	PB4     ------> SPI1_SCK
+	PB6     ------> SPI1_MISO
+	PB7     ------> SPI1_MOSI
+  */
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 
+  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_6|GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
   /* USER CODE END SPI1_Init 2 */
 
 }
@@ -1041,6 +1135,25 @@ static void MX_USART6_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA2_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+  /* DMA2_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -1053,12 +1166,12 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOE_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1|GPIO_PIN_3, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
@@ -1069,12 +1182,18 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOE, GPIO_PIN_0, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : PC1 PC3 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_3;
+  /*Configure GPIO pins : PC1 PC3 PC4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PE7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PB12 PB13 PB14 PB15 */
   GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
@@ -1146,6 +1265,177 @@ char *SubStr( char *pnInput, int nStart, int nLen )
     pszOutPut[nLoop - nStart] = '\0' ;
     return pszOutPut ;
 }
+/*##########################################################################################################*/
+
+/*##########################################################################################################*/
+
+void EthernetTest(unsigned char *pRcvBuffer, unsigned int len)
+{
+	unsigned int i;
+
+	printf("Read Data[%d]\r\n", len);
+
+	for(i=0;i<len;i++)
+	{
+		//receive data
+		printf("%c ", pRcvBuffer[i]);
+	}
+
+	//receive data control
+	if(pRcvBuffer[0] == '1')
+	{
+		printf("zero\r\n");
+	}
+	else if(pRcvBuffer[0] == '0')
+	{
+		printf("one\r\n");
+	}
+}
+
+
+//TCP-Server process
+void ProcessTcpSever(void)
+{
+	//printf("process TCP Server function .. \r\n");
+	int len;
+	unsigned char data_buf[TX_RX_MAX_BUF_SIZE];
+
+	unsigned int port = MY_LISTEN_PORT;
+
+	switch (getSn_SR(SOCK_TCPS))
+	{
+	case SOCK_ESTABLISHED:
+		// check receive data
+		if((len = getSn_RX_RSR(SOCK_TCPS)) > 0)
+		{
+			//if Rx data size is lager than TX_RX_MAX_BUF_SIZE
+			if (len > TX_RX_MAX_BUF_SIZE) len = TX_RX_MAX_BUF_SIZE;
+
+			// data receive
+			len = recv(SOCK_TCPS, data_buf, len);
+
+			// send the received data
+			//send(SOCK_MYTEST, data_buf, len);
+
+			EthernetTest(data_buf, len);
+		}
+		break;
+
+	case SOCK_CLOSE_WAIT:
+		//If the client request to close
+		disconnect(SOCK_TCPS);
+
+		m_SokStatus1 = 0;
+		break;
+
+	case SOCK_CLOSED:
+		if(!m_SokStatus1)
+		{
+			m_SokStatus1 = 1;
+		}
+
+		//reinitialize the socket
+		if(socket(SOCK_TCPS,Sn_MR_TCP, port,0x00) == 0)
+		{
+			printf("Fail to create socket.");
+			m_SokStatus1 = 0;
+		}
+		else
+		{
+			listen(SOCK_TCPS);
+		}
+
+		break;
+	}
+}
+
+void DisplayConfig(void)
+{
+	u_char addr[6];
+	u_char i = 0;
+	//u_long iaddr;
+	printf("\r\n================================================\r\n");
+	printf("       Net Config Information\r\n");
+	printf("================================================\r\n");
+
+
+	for(i=0; i<6;i++)addr[i] = IINCHIP_READ(SHAR0+i);
+	printf("MAC ADDRESS      : 0x%02X.0x%02X.0x%02X.0x%02X.0x%02X.0x%02X\r\n",addr[0],addr[1],addr[2],addr[3],addr[4],addr[5]);
+
+
+	printf("SUBNET MASK      : ");
+	for(i=0; i < 4; i++)
+	{
+		printf("%d.", (char)IINCHIP_READ(SUBR0+i));
+	}
+
+
+	printf("\r\nG/W IP ADDRESS   : ");
+	for(i=0; i < 4; i++)
+	{
+		printf("%d.", (char)IINCHIP_READ(GAR0+i));
+	}
+
+	printf("\r\nLOCAL IP ADDRESS : ");
+	for(i=0; i < 4; i++)
+	{
+		printf("%d.", (char)IINCHIP_READ(SIPR0+i));
+	}
+
+	printf("\r\n================================================\r\n");
+
+}
+
+
+/*##########################################################################################################*/
+
+/*##########################################################################################################*/
+
+void NetInit(void)
+{
+	unsigned char mac[6] = MY_NET_MAC;
+	unsigned char sm[4]	= MY_SUBNET;
+	unsigned char gwip[4]	= MY_NET_GWIP;
+	unsigned char m_sip[4]	= MY_SOURCEIP;
+
+	//W5100 Chip Init
+	iinchip_init();
+
+	wizchip_init(2, 2);
+
+	//Set MAC Address
+	setSHAR(mac);
+
+	//Set Gateway
+	setGAR(gwip);
+
+	//Set Subnet Mask
+	setSUBR(sm);
+
+	//Set My IP
+	setSIPR(m_sip);
+
+#ifdef __DEF_IINCHIP_INT__
+	setIMR(0xEF);
+#endif
+
+	//sysinit(MY_NET_MEMALLOC, MY_NET_MEMALLOC);
+}
+
+/**
+@brief	This function is for resetting of the iinchip. Initializes the iinchip to work in whether DIRECT or INDIRECT mode
+*/
+void iinchip_init(void)
+{
+	setMR( MR_RST );
+#if (__DEF_IINCHIP_BUS__ == __DEF_IINCHIP_INDIRECT_MODE__)
+	setMR( MR_IND | MR_AI );
+#ifdef __DEF_IINCHIP_DBG__
+	printf("MR value is %d \r\n",IINCHIP_READ(MR));
+#endif
+#endif
+}
+
 /*##########################################################################################################*/
 
 /* USER CODE END 4 */

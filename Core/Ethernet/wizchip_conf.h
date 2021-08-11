@@ -61,7 +61,7 @@
  *       ex> <code> #define \_WIZCHIP_      5500 </code>
  */
 #ifndef _WIZCHIP_
-#define _WIZCHIP_                      5500   // 5100, 5200, 5300, 5500
+#define _WIZCHIP_                      5100 	//5500   // 5100, 5200, 5300, 5500
 #endif
 
 #define _WIZCHIP_IO_MODE_NONE_         0x0000

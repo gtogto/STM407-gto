@@ -59,7 +59,10 @@ void Error_Handler(void);
 
 /* Private defines -----------------------------------------------------------*/
 /* USER CODE BEGIN Private defines */
-
+// Enter interrupt
+#define __DEF_IINCHIP_BUS__ __DEF_IINCHIP_SPI_MODE__ /*Enable SPI_mode*/
+#define enable()  __asm__ __volatile__ ("sei" ::)
+#define disable() __asm__ __volatile__ ("cli" ::)
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
