@@ -190,6 +190,9 @@ char* 	reset_CMD;
 #define WRONG_STATUS_MSG	 "Something went wrong; STATUS: %d\r\n"
 #define LISTEN_ERR_MSG		 "LISTEN Error!\r\n"
 
+#define E_RST_HIGH()		HAL_GPIO_WritePin(GPIOC, E_RST, 1)
+#define E_RST_LOW()			HAL_GPIO_WritePin(GPIOC, E_RST, 0)
+
 #define SOCK_LISTEN         0x14
 #define SOCK_ESTABLISHED    0x17
 #define SOCK_CLOSE_WAIT     0x1C
@@ -432,14 +435,14 @@ int main(void)
 
   //HAL_GPIO_WritePin(GPIOC, RX_EN, 1);		// GPIO PC1 OUTPUT HIGH -> rx enable
 
-  HAL_GPIO_WritePin(GPIOC, E_RST, 1);		// Ethernet Enable
-
   /*##########################################################################################################*/
 
   /*##########################################################################################################*/
   /*ETHERNET SET*/
   //gto
   printf("\r\n EHTERNET RUNNING .... 20210813 \r\n");
+  E_RST_HIGH();								// Ethernet Enable
+  //HAL_GPIO_WritePin(GPIOC, E_RST, 1);		// Ethernet Enable
 
   reg_wizchip_cs_cbfunc(cs_sel, cs_desel);
   reg_wizchip_spi_cbfunc(spi_rb, spi_wb);
@@ -461,11 +464,11 @@ int main(void)
   PRINT_NETINFO(netInfo);
 
 reconnect:
-  /* Open socket 0 as TCP_SOCKET with port 5000 */
+  /* Open socket 0 as TCP_SOCKET with port 60500 */
   if((retVal = socket(0, Sn_MR_TCP, 60500, 0)) == 0) {
 	  /* Put socket in LISTEN mode. This means we are creating a TCP server */
 	  if((retVal = listen(0)) == SOCK_OK) {
-		  printf("SOCK_OK !! \r\n");
+		  printf("######### SOCKET READY !! \r\n");
 		  /* While socket is in LISTEN mode we wait for a remote connection */
 		  while(sockStatus = getSn_SR(0) == SOCK_LISTEN)
 			  //printf("SOCK LISTENNING ... !! \r\n");
@@ -474,20 +477,28 @@ reconnect:
   		  while(1) {
   			  /* If connection is ESTABLISHED with remote peer */
   			  if(sockStatus = getSn_SR(0) == SOCK_ESTABLISHED) {
-  				  printf("SOCK_ESTABLISHED !! \r\n");
+  				  printf("######### SOCK_ESTABLISHED !! \r\n");
   				  uint8_t remoteIP[4];
   				  uint16_t remotePort;
+
   				  /* Retrieving remote peer IP and port number */
   				  getsockopt(0, SO_DESTIP, remoteIP);
   				  getsockopt(0, SO_DESTPORT, (uint8_t*)&remotePort);
   				  sprintf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
+  				  printf("====================================================== \r\n");
   				  printf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
+  				  printf("====================================================== \r\n");
   				  PRINT_STR(msg);
+
   				  /* Let's send a welcome message and closing socket */
-  				  if(retVal = send(0, GREETING_MSG, strlen(GREETING_MSG)) == (int16_t)strlen(GREETING_MSG))
+  				  if(retVal = send(0, GREETING_MSG, strlen(GREETING_MSG)) == (int16_t)strlen(GREETING_MSG)) {
+  					  printf("######### WELCOME MESSAGE !! \r\n");
   					  PRINT_STR(SENT_MESSAGE_MSG);
+  				  }
+
   				  else { /* Ops: something went wrong during data transfer */
   					  sprintf(msg, WRONG_RETVAL_MSG, retVal);
+  					  printf(" Wrong MESSAGE !! \r\n");
   					  PRINT_STR(msg);
   				  }
   				  break;
@@ -512,9 +523,9 @@ reconnect:
   goto reconnect;
 
   /* Infinite loop */
-  while (1)
+  /*while (1)
   {
-  }
+  }*/
 
 
   /*##########################################################################################################*/
