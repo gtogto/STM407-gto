@@ -131,6 +131,8 @@ uint8_t rx_data;
 uint8_t uart1_key_Flag = 0;
 uint8_t uart2_key_Flag = 0;
 
+uint8_t etherNet_Flag = 0;
+
 uint8_t id_1, id_2, id_3, id_4;
 int deci1,deci2,deci3,deci4;
 int result_bin;
@@ -176,6 +178,7 @@ char* 	reset_CMD;
 
 /*##########################################################################################################*/
 /* Ethernet */
+#define PORT				60500
 #define SEPARATOR            "=============================================\r\n"
 #define WELCOME_MSG  		 "Welcome to STM32Nucleo Ethernet configuration\r\n"
 #define NETWORK_MSG  		 "Network configuration:\r\n"
@@ -183,7 +186,7 @@ char* 	reset_CMD;
 #define NETMASK_MSG	         "  NETMASK:     %d.%d.%d.%d\r\n"
 #define GW_MSG 		 		 "  GATEWAY:     %d.%d.%d.%d\r\n"
 #define MAC_MSG		 		 "  MAC ADDRESS: %x:%x:%x:%x:%x:%x\r\n"
-#define GREETING_MSG 		 "Well done! Connected to the STM-407 Board. GoodBye!! \r\n"
+#define GREETING_MSG 		 "Well done! Connected to the STM-407 Board. GoodBye!!\r\n"
 #define CONN_ESTABLISHED_MSG "Connection established with remote IP: %d.%d.%d.%d:%d\r\n"
 #define SENT_MESSAGE_MSG	 "Sent a message. Let's close the socket!\r\n"
 #define WRONG_RETVAL_MSG	 "Something went wrong; return value: %d\r\n"
@@ -240,6 +243,13 @@ void spi_wb(uint8_t b) {
 	HAL_SPI_Transmit(&hspi1, &b, 1, 0xFFFFFFFF);
 }
 
+uint8_t retVal, sockStatus;
+uint8_t bufSize[] = {2, 2, 2, 2};
+
+#define SOCK_TCPS			0
+#define TX_RX_MAX_BUF_SIZE	2048
+
+int32_t loopback_tcps(uint8_t, uint8_t*, uint16_t);		// Loopback TCP server
 
 /*##########################################################################################################*/
 
@@ -343,6 +353,18 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 
 	}
 }
+/*##########################################################################################################*/
+
+/*##########################################################################################################*/
+//External Interrupt
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	//printf("EXTI Callback Function !! \r\n");
+	etherNet_Flag = 1;
+	//TCP_Ethernet_Server();
+}
+/*##########################################################################################################*/
+
 
 /*##########################################################################################################*/
 /*Send information (strings) to the console (PC) */
@@ -378,10 +400,6 @@ void debugPrintln(UART_HandleTypeDef *huart, char _out[]){
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
-  uint8_t retVal, sockStatus;
-  int16_t rcvLen;
-  uint8_t rcvBuf[20], bufSize[] = {2, 2, 2, 2};
 
   /* USER CODE END 1 */
 
@@ -420,6 +438,14 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   /*##########################################################################################################*/
+  /*START DEBUGGING MESSAGE*/
+
+  printf("\r\n Start STM32F407 for Master Anchor - 20210817 \r\n");
+
+  /*END DEBUGGING MESSAGE*/
+  /*##########################################################################################################*/
+
+  /*##########################################################################################################*/
   /*INTERRUPT SET*/
   //gto
   HAL_UART_Receive_IT(&huart1, &rx_data, 1);
@@ -440,9 +466,11 @@ int main(void)
   /*##########################################################################################################*/
   /*ETHERNET SET*/
   //gto
-  printf("\r\n EHTERNET RUNNING .... 20210813 \r\n");
+  //printf("\r\n EHTERNET RUNNING .... 20210813 \r\n");
   E_RST_HIGH();								// Ethernet Enable
   //HAL_GPIO_WritePin(GPIOC, E_RST, 1);		// Ethernet Enable
+
+  //HAL_GPIO_WritePin(GPIOE, GPIO_PIN_7, 1);	// Ethernet Extra Interrupt Enable
 
   reg_wizchip_cs_cbfunc(cs_sel, cs_desel);
   reg_wizchip_spi_cbfunc(spi_rb, spi_wb);
@@ -463,82 +491,9 @@ int main(void)
   wizchip_getnetinfo(&netInfo);
   PRINT_NETINFO(netInfo);
 
-reconnect:
-  /* Open socket 0 as TCP_SOCKET with port 60500 */
-  if((retVal = socket(0, Sn_MR_TCP, 60500, 0)) == 0) {
-	  /* Put socket in LISTEN mode. This means we are creating a TCP server */
-	  if((retVal = listen(0)) == SOCK_OK) {
-		  printf("######### SOCKET READY !! \r\n");
-		  /* While socket is in LISTEN mode we wait for a remote connection */
-		  while(sockStatus = getSn_SR(0) == SOCK_LISTEN)
-			  //printf("SOCK LISTENNING ... !! \r\n");
-			  HAL_Delay(100);
-  		  /* OK. Got a remote peer. Let's send a message to it */
-  		  while(1) {
-  			  /* If connection is ESTABLISHED with remote peer */
-  			  if(sockStatus = getSn_SR(0) == SOCK_ESTABLISHED) {
-  				  printf("######### SOCK_ESTABLISHED !! \r\n");
-  				  uint8_t remoteIP[4];
-  				  uint16_t remotePort;
-
-  				  /* Retrieving remote peer IP and port number */
-  				  getsockopt(0, SO_DESTIP, remoteIP);
-  				  getsockopt(0, SO_DESTPORT, (uint8_t*)&remotePort);
-  				  sprintf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
-  				  printf("====================================================== \r\n");
-  				  printf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
-  				  printf("====================================================== \r\n");
-  				  PRINT_STR(msg);
-
-  				  /* Let's send a welcome message and closing socket */
-  				  if(retVal = send(0, GREETING_MSG, strlen(GREETING_MSG)) == (int16_t)strlen(GREETING_MSG)) {
-  					  printf("######### WELCOME MESSAGE !! \r\n");
-  					  PRINT_STR(SENT_MESSAGE_MSG);
-  				  }
-
-  				  else { /* Ops: something went wrong during data transfer */
-  					  sprintf(msg, WRONG_RETVAL_MSG, retVal);
-  					  printf(" Wrong MESSAGE !! \r\n");
-  					  PRINT_STR(msg);
-  				  }
-  				  break;
-  			  }
-  			  else { /* Something went wrong with remote peer, maybe the connection was closed unexpectedly */
-  				  sprintf(msg, WRONG_STATUS_MSG, sockStatus);
-  				  PRINT_STR(msg);
-  				  break;
-  			  }
-  		  }
-
-  	  } else /* Ops: socket not in LISTEN mode. Something went wrong */
-  		  PRINT_STR(LISTEN_ERR_MSG);
-  } else { /* Can't open the socket. This means something is wrong with W5100 configuration: maybe SPI issue? */
-  	  sprintf(msg, WRONG_RETVAL_MSG, retVal);
-  	  PRINT_STR(msg);
-  }
-
-  /* We close the socket and start a connection again */
-  disconnect(0);
-  close(0);
-  goto reconnect;
-
-  /* Infinite loop */
-  /*while (1)
-  {
-  }*/
-
 
   /*##########################################################################################################*/
 
-
-  /*##########################################################################################################*/
-  /*START DEBUGGING MESSAGE*/
-
-  printf("\r\n Start STM32F407 - 20210813 \r\n");
-
-
-  /*END DEBUGGING MESSAGE*/
-  /*##########################################################################################################*/
 
   /* USER CODE END 2 */
 
@@ -553,20 +508,19 @@ reconnect:
 	  //DWT_Delay_us(1000);											// 10 microsecond
 	  //HAL_UART_Transmit(&huart6, (uint8_t *) &test, 1, 10);		//4mbps test
 
-
+	  loopback_tcps(SOCK_TCPS, 100, 60500);
 
 	  if (uart1_key_Flag){
 		  uart1_key_Flag = 0;
 		  switch(rx_data){
-
-			  case 's':
-				  Sync_out();
-				  break;
-
 			  case 'a':
 				  debugPrint(&huart1, "debugPrint test ");
 				  debugPrintln(&huart1, "debugPrintln test");
 				  printf("printf test\r\n");
+				  break;
+
+			  case 's':
+				  Sync_out();
 				  break;
 
 			  case '2':
@@ -585,7 +539,6 @@ reconnect:
 
 			  case 't':
 				  HAL_UART_Transmit(&huart6, (uint8_t *) &uart6_Signal, 1, 10);		// send data(0x00)
-
 				  break;
 
 			  case 'z':
@@ -598,12 +551,21 @@ reconnect:
 
 			  case 'c':
 				  HAL_UART_Transmit(&huart2, (uint8_t *) "[RID=08 407 TO SLAVE ANCHOR DEVICE]", 35, 100);
+				  break;
 
+			  case 'e':
+				  //etherNet_Flag = 1;
+				  //TCP_Ethernet_Server();
+				  //loopback_tcps(SOCK_TCPS, 100, 60500);
+				  if((retVal = send(0, GREETING_MSG, strlen(GREETING_MSG))) == (int16_t)strlen(GREETING_MSG)) {
+					  printf("######### WELCOME MESSAGE !! \r\n");
+					  PRINT_STR(SENT_MESSAGE_MSG);
+					  //etherNet_Flag = 0;
+				  }
 				  break;
 
 		  }
 	  }
-
 
 	  if(uart2_key_Flag) {
 		  uart2_key_Flag = 0;
@@ -627,6 +589,11 @@ reconnect:
 			  HAL_UART_Transmit(&huart1, (uint8_t *) &GTO_rxd[i], 1, 10);
 		  }
 		  //printf("\r\n\r\n");
+
+	  }
+
+	  if(etherNet_Flag){
+		  etherNet_Flag = 0;
 
 	  }
 
@@ -1221,6 +1188,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
 }
 
 /* USER CODE BEGIN 4 */
@@ -1265,8 +1236,132 @@ char *SubStr( char *pnInput, int nStart, int nLen )
     return pszOutPut ;
 }
 /*##########################################################################################################*/
+void TCP_Ethernet_Server(void){
+	printf("\r\n EHTERNET RUNNING .... 20210817 \r\n");
 
+	/* Open socket 0 as TCP_SOCKET with port 60500 */
+	if((retVal = socket(0, Sn_MR_TCP, PORT, 0)) == 0) {
+		/* Put socket in LISTEN mode. This means we are creating a TCP server */
+		if((retVal = listen(0)) == SOCK_OK) {
+			printf("######### SOCKET READY !! \r\n");
+			/* While socket is in LISTEN mode we wait for a remote connection */
+			while((sockStatus = getSn_SR(0)) == SOCK_LISTEN)
+				//printf("SOCK LISTENNING ... !! \r\n");
+				HAL_Delay(100);
+			/* OK. Got a remote peer. Let's send a message to it */
+				while(1) {
+	  			  /* If connection is ESTABLISHED with remote peer */
+	  			  if((sockStatus = getSn_SR(0)) == SOCK_ESTABLISHED) {
+	  				  printf("######### SOCK_ESTABLISHED !! \r\n");
+	  				  uint8_t remoteIP[4];
+	  				  uint16_t remotePort;
+
+	  				  /* Retrieving remote peer IP and port number */
+	  				  getsockopt(0, SO_DESTIP, remoteIP);
+	  				  getsockopt(0, SO_DESTPORT, (uint8_t*)&remotePort);
+	  				  sprintf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
+	  				  printf("====================================================== \r\n");
+	  				  printf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
+	  				  printf("====================================================== \r\n");
+	  				  PRINT_STR(msg);
+
+	  				  /* Let's send a welcome message and closing socket */
+	  				  if((retVal = send(0, GREETING_MSG, strlen(GREETING_MSG))) == (int16_t)strlen(GREETING_MSG)) {
+	  					  printf("######### WELCOME MESSAGE !! \r\n");
+	  					  PRINT_STR(SENT_MESSAGE_MSG);
+	  					  etherNet_Flag = 0;
+	  				  }
+
+	  				  else { /* Ops: something went wrong during data transfer */
+	  					  sprintf(msg, WRONG_RETVAL_MSG, retVal);
+	  					  printf(" Wrong MESSAGE !! \r\n");
+	  					  PRINT_STR(msg);
+	  				  }
+	  				  break;
+	  			  }
+	  			  else { /* Something went wrong with remote peer, maybe the connection was closed unexpectedly */
+	  				  sprintf(msg, WRONG_STATUS_MSG, sockStatus);
+	  				  PRINT_STR(msg);
+	  				  break;
+	  			  }
+	  		  }
+
+	  	  } else /* Ops: socket not in LISTEN mode. Something went wrong */
+	  		  PRINT_STR(LISTEN_ERR_MSG);
+	  } else { /* Can't open the socket. This means something is wrong with W5100 configuration: maybe SPI issue? */
+	  	  sprintf(msg, WRONG_RETVAL_MSG, retVal);
+	  	  PRINT_STR(msg);
+	  }
+
+	  /* We close the socket and start a connection again */
+	  //disconnect(0);
+	  //close(0);
+}
 /*##########################################################################################################*/
+void EthernetTest(unsigned char *pRcvBuffer, unsigned int len)
+{
+	unsigned int i;
+
+	printf("Read Data[%d]\r\n", len);
+
+	for(i=0;i<len;i++)
+	{
+		//수신데이터 표시
+		printf("%c ", pRcvBuffer[i]);
+	}
+}
+
+int32_t loopback_tcps(uint8_t sn, uint8_t* buf, uint16_t port)
+{
+   int32_t ret;
+   uint16_t size = 0, sentsize=0;
+   switch(getSn_SR(sn))
+   {
+      case SOCK_ESTABLISHED :
+         if(getSn_IR(sn) & Sn_IR_CON)
+         {
+            printf("%d:Connected\r\n",sn);
+            setSn_IR(sn,Sn_IR_CON);
+         }
+         if((size = getSn_RX_RSR(sn)) > 0)
+         {
+            if(size > TX_RX_MAX_BUF_SIZE) size = TX_RX_MAX_BUF_SIZE;
+            ret = recv(sn,buf,size);
+            if(ret <= 0) return ret;
+            sentsize = 0;
+            while(size != sentsize)
+            {
+               ret = send(sn,buf+sentsize,size-sentsize);
+               printf("RX : %s \r\n",buf);
+               if(ret < 0)
+               {
+                  close(sn);
+                  return ret;
+               }
+               sentsize += ret; // Don't care SOCKERR_BUSY, because it is zero.
+            }
+         }
+         break;
+      case SOCK_CLOSE_WAIT :
+         printf("%d:CloseWait\r\n",sn);
+         if((ret=disconnect(sn)) != SOCK_OK) return ret;
+         printf("%d:Closed\r\n",sn);
+         break;
+      case SOCK_INIT :
+    	  printf("%d:Listen, port [%d]\r\n",sn, port);
+         if( (ret = listen(sn)) != SOCK_OK) return ret;
+         break;
+      case SOCK_CLOSED:
+         printf("%d:LBTStart\r\n",sn);
+         if((ret=socket(sn,Sn_MR_TCP,port,0x00)) != sn)
+            return ret;
+         printf("%d:Opened\r\n",sn);
+         break;
+      default:
+         break;
+   }
+   return 1;
+}
 
 
 /*##########################################################################################################*/
