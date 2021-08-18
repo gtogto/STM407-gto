@@ -166,9 +166,6 @@ uint8_t   GTO_status = GTO_START;
 uint8_t   GTO_rx_cnt;
 uint8_t   GTO_rxdata;
 
-
-
-
 uint8_t   data_receive_flag = 0;
 
 uint8_t   uart_6_flag = 0;
@@ -192,11 +189,13 @@ char* 	reset_CMD;
 #define WRONG_RETVAL_MSG	 "Something went wrong; return value: %d\r\n"
 #define WRONG_STATUS_MSG	 "Something went wrong; STATUS: %d\r\n"
 #define LISTEN_ERR_MSG		 "LISTEN Error!\r\n"
+#define GTO_MSG		 		 "GTO Return MSG\r\n"
 
 #define E_RST_HIGH()		HAL_GPIO_WritePin(GPIOC, E_RST, 1)
 #define E_RST_LOW()			HAL_GPIO_WritePin(GPIOC, E_RST, 0)
 
 #define SOCK_LISTEN         0x14
+#define SOCK_INIT	        0x13
 #define SOCK_ESTABLISHED    0x17
 #define SOCK_CLOSE_WAIT     0x1C
 #define SOCK_CLOSED			0x00
@@ -249,7 +248,17 @@ uint8_t bufSize[] = {2, 2, 2, 2};
 #define SOCK_TCPS			0
 #define TX_RX_MAX_BUF_SIZE	2048
 
-int32_t loopback_tcps(uint8_t, uint8_t*, uint16_t);		// Loopback TCP server
+int32_t loopback_tcps(uint8_t, uint8_t *buf, uint16_t);		// Loopback TCP server
+
+static uint8_t buff_size[] = { 2, 2, 2, 2 };
+#define Sn_IMR(N)          (_W5100_IO_BASE_ + (0x002C << 8) + (WIZCHIP_SREG_BLOCK(N) << 3))
+#define setSn_IMR(sn, imr) \
+		WIZCHIP_WRITE(Sn_IMR(sn), (imr & 0x1F))1
+
+uint32_t	ret;
+uint16_t	size = 0, sentsize = 0;
+
+uint8_t c_buffer[8];		//client sends 8 bytes
 
 /*##########################################################################################################*/
 
@@ -359,8 +368,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 //External Interrupt
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	//printf("EXTI Callback Function !! \r\n");
+	printf("EXTERNAL INTERRUPT CALLBACK EVENT !! \r\n");
 	etherNet_Flag = 1;
+	setSn_IR(0, 0xff);
 	//TCP_Ethernet_Server();
 }
 /*##########################################################################################################*/
@@ -440,7 +450,11 @@ int main(void)
   /*##########################################################################################################*/
   /*START DEBUGGING MESSAGE*/
 
-  printf("\r\n Start STM32F407 for Master Anchor - 20210817 \r\n");
+  printf("\r\n * Start STM32F407 for Master Anchor - 20210818 GTO * \r\n\n");
+  printf(" =============== 1. UART and 4Mbps test Okay (USART 1, 2, 3, 4, 5, 6) \r\n");
+  printf(" =============== 2. GPIO test Okay \r\n");
+  printf(" =============== 3. SPI and EXTI test Okay (for Ethernet) \r\n");
+  printf(" =============== 4. ETHERNET test Okay (Handler Callback) \r\n");
 
   /*END DEBUGGING MESSAGE*/
   /*##########################################################################################################*/
@@ -508,7 +522,9 @@ int main(void)
 	  //DWT_Delay_us(1000);											// 10 microsecond
 	  //HAL_UART_Transmit(&huart6, (uint8_t *) &test, 1, 10);		//4mbps test
 
-	  loopback_tcps(SOCK_TCPS, 100, 60500);
+	  loopback_tcps(SOCK_TCPS, 20, 60500);
+	  //setIMR(0x01);
+	  //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
 
 	  if (uart1_key_Flag){
 		  uart1_key_Flag = 0;
@@ -555,17 +571,41 @@ int main(void)
 
 			  case 'e':
 				  //etherNet_Flag = 1;
-				  //TCP_Ethernet_Server();
-				  //loopback_tcps(SOCK_TCPS, 100, 60500);
-				  if((retVal = send(0, GREETING_MSG, strlen(GREETING_MSG))) == (int16_t)strlen(GREETING_MSG)) {
-					  printf("######### WELCOME MESSAGE !! \r\n");
-					  PRINT_STR(SENT_MESSAGE_MSG);
-					  //etherNet_Flag = 0;
-				  }
-				  break;
+				  //setIMR(0x01);
+				  //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
+				  if (etherNet_Flag == 1){
+					  etherNet_Flag = 0;
 
+					  //setSn_IMR(0, 0xff);	//Interrupt occurs only in the recv interrupt of socket '0'.
+
+					  if((retVal = send(SOCK_TCPS, GREETING_MSG, strlen(GREETING_MSG))) == (int16_t)strlen(GREETING_MSG)) {
+						  printf("######### 407 board transmits data to server !! \r\n");
+						  PRINT_STR(SENT_MESSAGE_MSG);
+					  }
+				  }
+
+				  break;
 		  }
 	  }
+
+	  /*
+	  if (etherNet_Flag){
+		  etherNet_Flag = 0;
+		  if(getSn_SR(SOCK_TCPS) == SOCK_ESTABLISHED){
+			  //setIMR(0x01);
+			  //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
+			  ret = recv(SOCK_TCPS, c_buffer, sizeof(c_buffer));
+			  ret = send(SOCK_TCPS, c_buffer, strlen(c_buffer));
+			  //printf("recv data from client %c \r\n", c_buffer);
+			  for (int i = 0; i < 4; i++) {
+				  printf("recv data from client %c \r\n", c_buffer[i]);
+			  }
+		  }
+	  }*/
+
+	  //setIMR(0x01);
+	  //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
+
 
 	  if(uart2_key_Flag) {
 		  uart2_key_Flag = 0;
@@ -591,12 +631,6 @@ int main(void)
 		  //printf("\r\n\r\n");
 
 	  }
-
-	  if(etherNet_Flag){
-		  etherNet_Flag = 0;
-
-	  }
-
 
 	  id_1 = HAL_GPIO_ReadPin(GPIOB, ID1);
 	  id_2 = HAL_GPIO_ReadPin(GPIOB, ID2);
@@ -1269,7 +1303,7 @@ void TCP_Ethernet_Server(void){
 	  				  if((retVal = send(0, GREETING_MSG, strlen(GREETING_MSG))) == (int16_t)strlen(GREETING_MSG)) {
 	  					  printf("######### WELCOME MESSAGE !! \r\n");
 	  					  PRINT_STR(SENT_MESSAGE_MSG);
-	  					  etherNet_Flag = 0;
+	  					  //etherNet_Flag = 0;
 	  				  }
 
 	  				  else { /* Ops: something went wrong during data transfer */
@@ -1311,57 +1345,91 @@ void EthernetTest(unsigned char *pRcvBuffer, unsigned int len)
 	}
 }
 
-int32_t loopback_tcps(uint8_t sn, uint8_t* buf, uint16_t port)
+int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
 {
-   int32_t ret;
-   uint16_t size = 0, sentsize=0;
+	//setIMR(0x01);
+	//setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
+
    switch(getSn_SR(sn))
    {
-      case SOCK_ESTABLISHED :
-         if(getSn_IR(sn) & Sn_IR_CON)
-         {
-            printf("%d:Connected\r\n",sn);
-            setSn_IR(sn,Sn_IR_CON);
-         }
-         if((size = getSn_RX_RSR(sn)) > 0)
-         {
-            if(size > TX_RX_MAX_BUF_SIZE) size = TX_RX_MAX_BUF_SIZE;
-            ret = recv(sn,buf,size);
-            if(ret <= 0) return ret;
-            sentsize = 0;
-            while(size != sentsize)
-            {
-               ret = send(sn,buf+sentsize,size-sentsize);
-               printf("RX : %s \r\n",buf);
-               if(ret < 0)
-               {
-                  close(sn);
-                  return ret;
-               }
-               sentsize += ret; // Don't care SOCKERR_BUSY, because it is zero.
-            }
-         }
-         break;
-      case SOCK_CLOSE_WAIT :
-         printf("%d:CloseWait\r\n",sn);
-         if((ret=disconnect(sn)) != SOCK_OK) return ret;
-         printf("%d:Closed\r\n",sn);
-         break;
-      case SOCK_INIT :
-    	  printf("%d:Listen, port [%d]\r\n",sn, port);
-         if( (ret = listen(sn)) != SOCK_OK) return ret;
-         break;
-      case SOCK_CLOSED:
-         printf("%d:LBTStart\r\n",sn);
-         if((ret=socket(sn,Sn_MR_TCP,port,0x00)) != sn)
-            return ret;
-         printf("%d:Opened\r\n",sn);
-         break;
-      default:
-         break;
+   	   case SOCK_LISTEN :
+   		   asm("nop");
+   		   break;
+
+   	   case SOCK_ESTABLISHED :
+   		   setIMR(0x01);
+   		   setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
+
+   		   if(getSn_IR(sn) & Sn_IR_CON)
+   		   {
+   			   printf("%d:Connected \r\n", sn);
+   			   setSn_IR(sn, Sn_IR_CON);
+   		   }
+   		   if((size = getSn_RX_RSR(sn)) > 0)
+		   {
+			   ret = recv(SOCK_TCPS, c_buffer, sizeof(c_buffer));
+			   //USART1->DR = c_buffer[0] ;
+			   printf(" ######### Data received from the server : %s \r\n", c_buffer);
+			   ret = send(SOCK_TCPS, c_buffer, strlen(c_buffer));
+		   }
+
+   		   /*
+   		   if((size = getSn_RX_RSR(sn)) > 0)
+  		   {
+   			   //setIMR(0x01);
+			   //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
+   			   if(size > TX_RX_MAX_BUF_SIZE) size = TX_RX_MAX_BUF_SIZE;
+   			   ret = recv(sn, buf, size);
+   			   if(ret <= 0) return ret;
+   			   sentsize = 0;
+
+   			   ret = send(sn, buf, strlen(buf));
+			   printf(" ######### Data received from the server : %s \r\n", buf);
+
+   			   while(size != sentsize)
+   			   {
+   				   //ret = send(sn, buf, strlen(buf));
+   				   //ret = send(sn, GTO_MSG, strlen(GTO_MSG));
+   				   //printf(" ######### Data received from the server : %s \r\n", buf);
+
+   				   //ret = send(SOCK_TCPS, c_buffer, strlen(c_buffer));
+   				   //printf(" ######### Data received from the server : %s \r\n", c_buffer);
+
+   				   if(ret < 0)
+   				   {
+   					   close(sn);
+   					   return ret;
+   				   }
+   				   sentsize += ret; // Don't care SOCKERR_BUSY, because it is zero.
+   			   }
+   		   }*/
+   		   break;
+
+   	   case SOCK_CLOSE_WAIT :
+   		   printf("%d:CloseWait \r\n",sn);
+   		   if((ret=disconnect(sn)) != SOCK_OK) return ret;
+   		   printf("%d:Closed \r\n", sn);
+   		   break;
+
+   	   case SOCK_INIT :
+   		   printf("%d:Listen, port [%d]\r\n",sn, port);
+   		   if( (ret = listen(sn)) != SOCK_OK) return ret;
+   		   break;
+
+   	   case SOCK_CLOSED:
+   		   printf("%d:LBTStart \r\n", sn);
+   		   if((ret=socket(sn, Sn_MR_TCP, port, 0x00)) != sn)
+   			   return ret;
+   		   printf("%d:Opened \r\n", sn);
+   		   break;
+
+   	   default:
+   		   break;
    }
    return 1;
 }
+
+/*##########################################################################################################*/
 
 
 /*##########################################################################################################*/
