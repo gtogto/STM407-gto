@@ -455,6 +455,7 @@ int main(void)
   printf(" =============== 2. GPIO test Okay \r\n");
   printf(" =============== 3. SPI and EXTI test Okay (for Ethernet) \r\n");
   printf(" =============== 4. ETHERNET test Okay (Handler Callback) \r\n");
+  printf("\n");
 
   /*END DEBUGGING MESSAGE*/
   /*##########################################################################################################*/
@@ -1362,7 +1363,7 @@ int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
 
    		   if(getSn_IR(sn) & Sn_IR_CON)
    		   {
-   			   printf("%d:Connected \r\n", sn);
+   			   printf(" >>>>>>>> Socket Num. %d : Connected \r\n\n", sn);
    			   setSn_IR(sn, Sn_IR_CON);
    		   }
    		   if((size = getSn_RX_RSR(sn)) > 0)
@@ -1372,6 +1373,16 @@ int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
 			   printf(" ######### Data received from the server : %s \r\n", c_buffer);
 			   ret = send(SOCK_TCPS, c_buffer, strlen(c_buffer));
 		   }
+
+   		   while(size != sentsize)
+   		   {
+   			 if(ret < 0)
+   			 {
+   				 close(sn);
+   				 return ret;
+   			 }
+   			 sentsize += ret; // Don't care SOCKERR_BUSY, because it is zero.
+   		   }
 
    		   /*
    		   if((size = getSn_RX_RSR(sn)) > 0)
@@ -1406,21 +1417,21 @@ int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
    		   break;
 
    	   case SOCK_CLOSE_WAIT :
-   		   printf("%d:CloseWait \r\n",sn);
+   		   printf(" ******** Socket Num. %d:CloseWait \r\n",sn);
    		   if((ret=disconnect(sn)) != SOCK_OK) return ret;
    		   printf("%d:Closed \r\n", sn);
    		   break;
 
    	   case SOCK_INIT :
-   		   printf("%d:Listen, port [%d]\r\n",sn, port);
+   		   printf(" ******** Socket Num. %d : Listen, port [%d]\r\n",sn, port);
    		   if( (ret = listen(sn)) != SOCK_OK) return ret;
    		   break;
 
    	   case SOCK_CLOSED:
-   		   printf("%d:LBTStart \r\n", sn);
+   		   printf(" ******** Socket Num. %d : LBTStart \r\n", sn);
    		   if((ret=socket(sn, Sn_MR_TCP, port, 0x00)) != sn)
    			   return ret;
-   		   printf("%d:Opened \r\n", sn);
+   		   printf(" ******** Socket Num. %d : Opened \r\n", sn);
    		   break;
 
    	   default:
