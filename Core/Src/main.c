@@ -201,25 +201,25 @@ char* 	reset_CMD;
 #define SOCK_CLOSED			0x00
 
 #define PRINT_STR(msg) do  {										\
-  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);		\
+  HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);		\
 } while(0)
 
 #define PRINT_HEADER() do  {													\
-  HAL_UART_Transmit(&huart2, (uint8_t*)SEPARATOR, strlen(SEPARATOR), 100);		\
-  HAL_UART_Transmit(&huart2, (uint8_t*)WELCOME_MSG, strlen(WELCOME_MSG), 100);	\
-  HAL_UART_Transmit(&huart2, (uint8_t*)SEPARATOR, strlen(SEPARATOR), 100);		\
+  HAL_UART_Transmit(&huart1, (uint8_t*)SEPARATOR, strlen(SEPARATOR), 100);		\
+  HAL_UART_Transmit(&huart1, (uint8_t*)WELCOME_MSG, strlen(WELCOME_MSG), 100);	\
+  HAL_UART_Transmit(&huart1, (uint8_t*)SEPARATOR, strlen(SEPARATOR), 100);		\
 } while(0)
 
 #define PRINT_NETINFO(netInfo) do { 																					\
-  HAL_UART_Transmit(&huart2, (uint8_t*)NETWORK_MSG, strlen(NETWORK_MSG), 100);											\
+  HAL_UART_Transmit(&huart1, (uint8_t*)NETWORK_MSG, strlen(NETWORK_MSG), 100);											\
   sprintf(msg, MAC_MSG, netInfo.mac[0], netInfo.mac[1], netInfo.mac[2], netInfo.mac[3], netInfo.mac[4], netInfo.mac[5]);\
-  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);															\
+  HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);															\
   sprintf(msg, IP_MSG, netInfo.ip[0], netInfo.ip[1], netInfo.ip[2], netInfo.ip[3]);										\
-  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);															\
+  HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);															\
   sprintf(msg, NETMASK_MSG, netInfo.sn[0], netInfo.sn[1], netInfo.sn[2], netInfo.sn[3]);								\
-  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);															\
+  HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);															\
   sprintf(msg, GW_MSG, netInfo.gw[0], netInfo.gw[1], netInfo.gw[2], netInfo.gw[3]);										\
-  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 100);															\
+  HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);															\
 } while(0)
 
 char msg[60];
@@ -234,13 +234,15 @@ void cs_desel() {
 
 uint8_t spi_rb(void) {
 	uint8_t rbuf;
-	HAL_SPI_Receive(&hspi1, &rbuf, 1, 0xFFFFFFFF);
+	HAL_SPI_Receive(&hspi1, &rbuf, 1, 0xFFFFFFFFU);
 	return rbuf;
 }
 
 void spi_wb(uint8_t b) {
-	HAL_SPI_Transmit(&hspi1, &b, 1, 0xFFFFFFFF);
+	HAL_SPI_Transmit(&hspi1, &b, 1, 0xFFFFFFFFU);
 }
+
+
 
 uint8_t retVal, sockStatus;
 uint8_t bufSize[] = {2, 2, 2, 2};
@@ -248,7 +250,7 @@ uint8_t bufSize[] = {2, 2, 2, 2};
 #define SOCK_TCPS			0
 #define TX_RX_MAX_BUF_SIZE	2048
 
-int32_t loopback_tcps(uint8_t, uint8_t *buf, uint16_t);		// Loopback TCP server
+int32_t loopback_tcps(uint8_t, uint8_t*, uint16_t);		// Loopback TCP server
 
 static uint8_t buff_size[] = { 2, 2, 2, 2 };
 #define Sn_IMR(N)          (_W5100_IO_BASE_ + (0x002C << 8) + (WIZCHIP_SREG_BLOCK(N) << 3))
@@ -259,6 +261,15 @@ uint32_t	ret;
 uint16_t	size = 0, sentsize = 0;
 
 uint8_t c_buffer[8];		//client sends 8 bytes
+void wiz_send_data_gto(uint8_t sn, uint8_t *wizdata, uint16_t len);
+
+uint8_t ah, as;
+static uint16_t wizDHCPticks = 0;
+
+DESTINATION_SETUP Destination_Setup;
+uint8_t gDATABUF[DATA_BUF_SIZE];
+uint8_t TX_BUF[DATA_BUF_SIZE]; // TX Buffer for applications
+uint8_t ch_status[MAX_SOCK_NUM] = { 0, };	/** 0:close, 1:ready, 2:connected */
 
 /*##########################################################################################################*/
 
@@ -370,7 +381,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	printf("EXTERNAL INTERRUPT CALLBACK EVENT !! \r\n");
 	etherNet_Flag = 1;
-	setSn_IR(0, 0xff);
+	//setSn_IR(0, 0xff);
 	//TCP_Ethernet_Server();
 }
 /*##########################################################################################################*/
@@ -524,6 +535,7 @@ int main(void)
 	  //HAL_UART_Transmit(&huart6, (uint8_t *) &test, 1, 10);		//4mbps test
 
 	  loopback_tcps(SOCK_TCPS, 20, 60500);
+
 	  //setIMR(0x01);
 	  //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
 
@@ -574,17 +586,16 @@ int main(void)
 				  //etherNet_Flag = 1;
 				  //setIMR(0x01);
 				  //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
-				  if (etherNet_Flag == 1){
+
+				  //HAL_SPI_Transmit(&hspi1, (uint8_t *)"GTO", 3, 100);
+
+				  if (etherNet_Flag){
 					  etherNet_Flag = 0;
-
 					  //setSn_IMR(0, 0xff);	//Interrupt occurs only in the recv interrupt of socket '0'.
-
 					  if((retVal = send(SOCK_TCPS, GREETING_MSG, strlen(GREETING_MSG))) == (int16_t)strlen(GREETING_MSG)) {
 						  printf("######### 407 board transmits data to server !! \r\n");
-						  PRINT_STR(SENT_MESSAGE_MSG);
 					  }
 				  }
-
 				  break;
 		  }
 	  }
@@ -820,7 +831,7 @@ static void MX_SPI1_Init(void)
   GPIO_InitStruct.Pin = GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_HIGH;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -1341,7 +1352,7 @@ void EthernetTest(unsigned char *pRcvBuffer, unsigned int len)
 
 	for(i=0;i<len;i++)
 	{
-		//수신데이터 표시
+		//?��?��?��?��?�� ?��?��
 		printf("%c ", pRcvBuffer[i]);
 	}
 }
@@ -1371,7 +1382,7 @@ int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
 			   ret = recv(SOCK_TCPS, c_buffer, sizeof(c_buffer));
 			   //USART1->DR = c_buffer[0] ;
 			   printf(" ######### Data received from the server : %s \r\n", c_buffer);
-			   ret = send(SOCK_TCPS, c_buffer, strlen(c_buffer));
+			   ret = send(SOCK_TCPS, c_buffer+sentsize, size-sentsize);
 		   }
 
    		   while(size != sentsize)
@@ -1441,6 +1452,148 @@ int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
 }
 
 /*##########################################################################################################*/
+void network_init(void)
+{
+	uint8_t tmpstr[6];
+
+  	wiz_NetInfo gWIZNETINFO = { .mac 	= {0x00, 0x08, 0xdc, 0xab, 0xcd, 0xef},	// Mac address
+  								.ip 	= {10, 0, 7, 211},						// IP address
+								.sn 	= {255, 255, 248, 0},					// Subnet mask
+								.gw 	= {10, 0, 0, 1}};						// Gateway address
+
+	// source mac add set
+	gWIZNETINFO.mac[0] = 0x00; gWIZNETINFO.mac[1] = 0x08; gWIZNETINFO.mac[2] = 0xdc; gWIZNETINFO.mac[3] = 0x00; gWIZNETINFO.mac[4] = 0xab; gWIZNETINFO.mac[5] = 0xcd;
+	// source ip add set
+	gWIZNETINFO.ip[0] = 192; gWIZNETINFO.ip[1] = 168; gWIZNETINFO.ip[2] = 1; gWIZNETINFO.ip[3] = 2;
+	// source subnet add set
+	gWIZNETINFO.sn[0] = 255; gWIZNETINFO.sn[1] = 255; gWIZNETINFO.sn[2] = 255; gWIZNETINFO.sn[3] = 0;
+	// source gateway add set
+	gWIZNETINFO.gw[0] = 192; gWIZNETINFO.gw[1] = 168; gWIZNETINFO.gw[2] = 1; gWIZNETINFO.gw[3] = 1;
+	// source ip configuration type set
+	gWIZNETINFO.dhcp = NETINFO_STATIC;
+
+	// target server ip set
+	Destination_Setup.destip[0] = 192; Destination_Setup.destip[1] = 168; Destination_Setup.destip[2] = 1; Destination_Setup.destip[3] = 3;
+	// target server port set
+	Destination_Setup.port = 4000;
+
+	ctlnetwork(CN_SET_NETINFO, (void*)&gWIZNETINFO);
+
+	sys_tick_cnt = 100;
+	while(sys_tick_cnt);
+
+	ctlnetwork(CN_GET_NETINFO, (void*)&gWIZNETINFO);
+
+	// Display Network Information
+	ctlwizchip(CW_GET_ID,(void*)tmpstr);
+	printf("\r\n=== %x NET CONF ===\r\n",(char*)tmpstr);
+	printf("MAC: %02X:%02X:%02X:%02X:%02X:%02X\r\n",gWIZNETINFO.mac[0],gWIZNETINFO.mac[1],gWIZNETINFO.mac[2],
+		  gWIZNETINFO.mac[3],gWIZNETINFO.mac[4],gWIZNETINFO.mac[5]);
+	printf("SIP: %d.%d.%d.%d\r\n", gWIZNETINFO.ip[0],gWIZNETINFO.ip[1],gWIZNETINFO.ip[2],gWIZNETINFO.ip[3]);
+	printf("GAR: %d.%d.%d.%d\r\n", gWIZNETINFO.gw[0],gWIZNETINFO.gw[1],gWIZNETINFO.gw[2],gWIZNETINFO.gw[3]);
+	printf("SUB: %d.%d.%d.%d\r\n", gWIZNETINFO.sn[0],gWIZNETINFO.sn[1],gWIZNETINFO.sn[2],gWIZNETINFO.sn[3]);
+	printf("DNS: %d.%d.%d.%d\r\n", gWIZNETINFO.dns[0],gWIZNETINFO.dns[1],gWIZNETINFO.dns[2],gWIZNETINFO.dns[3]);
+	printf("======================\r\n");
+}
+
+
+
+void loopback_tcpc(SOCKET s, uint16_t port)
+{
+	uint16_t RSR_len;
+	uint16_t received_len;
+	uint16_t any_port = 1000;
+	uint8_t * data_buf = TX_BUF;
+
+   switch (getSn_SR(s))
+   {
+		case SOCK_ESTABLISHED:                 /* if connection is established */
+				  if(ch_status[s]==1)
+				  {
+					 printf("\r\n%d : Server IP : %d.%d.%d.%d  , Port : %d  Connected",s,Destination_Setup.destip[0],Destination_Setup.destip[1],Destination_Setup.destip[2],Destination_Setup.destip[3],Destination_Setup.port);
+					 ch_status[s] = 2;
+				  }
+
+				  if ((RSR_len = getSn_RX_RSR(s)) > 0)         /* check Rx data */
+				  {
+					 if (RSR_len > DATA_BUF_SIZE) RSR_len = DATA_BUF_SIZE;   /* if Rx data size is lager than TX_RX_MAX_BUF_SIZE */
+																						/* the data size to read is MAX_BUF_SIZE. */
+					 received_len = recv(s, data_buf, RSR_len);         /* read the received data */
+					 send(s, data_buf, received_len);         /* sent the received data */
+
+					 printf("RX : %s \r\n",data_buf);
+				  }
+
+				  break;
+
+		case SOCK_CLOSE_WAIT:                                 /* If the client request to close */
+				  printf("\r\n%d : CLOSE_WAIT", s);
+				  if ((RSR_len = getSn_RX_RSR(s)) > 0)         /* check Rx data */
+				  {
+					 if (RSR_len > DATA_BUF_SIZE) RSR_len = DATA_BUF_SIZE;   /* if Rx data size is lager than TX_RX_MAX_BUF_SIZE */
+																								/* the data size to read is MAX_BUF_SIZE. */
+					 received_len = recv(s, data_buf, RSR_len);         /* read the received data */
+				  }
+				  disconnect(s);
+				  ch_status[s] = 0;
+				  break;
+
+		case SOCK_CLOSED:                                               /* if a socket is closed */
+				  if(!ch_status[s])
+				  {
+					 printf("\r\n%d : Loop-Back TCP Client Started. port: %d", s, port);
+					 ch_status[s] = 1;
+				  }
+				  if(socket(s, Sn_MR_TCP, any_port++, 0x00) == 0)    /* reinitialize the socket */
+				  {
+					 printf("\a%d : Fail to create socket.",s);
+					 ch_status[s] = 0;
+				  }
+				  break;
+
+		case SOCK_INIT:     /* if a socket is initiated */
+					if(sys_tick_cnt == 0)
+					{
+							connect(s, Destination_Setup.destip, Destination_Setup.port); /* Try to connect to TCP server(Socket, DestIP, DestPort) */
+							sys_tick_cnt = 3000;
+					}
+						break;
+		default:
+						break;
+	}
+}
+
+/*##########################################################################################################*/
+void wiz_send_data_gto(uint8_t sn, uint8_t *wizdata, uint16_t len)
+{
+  uint16_t ptr;
+  uint16_t size;
+  uint16_t dst_mask;
+  uint16_t dst_ptr;
+  //printf("send function \r\n");
+  ptr = getSn_TX_WR(sn);
+
+  dst_mask = ptr & getSn_TxMASK(sn);
+  dst_ptr = getSn_TxBASE(sn) + dst_mask;
+
+  if (dst_mask + len > getSn_TxMAX(sn))
+  {
+    size = getSn_TxMAX(sn) - dst_mask;
+    WIZCHIP_WRITE_BUF(dst_ptr, wizdata, size);
+    wizdata += size;
+    size = len - size;
+    dst_ptr = getSn_TxBASE(sn);
+    WIZCHIP_WRITE_BUF(dst_ptr, wizdata, size);
+  }
+  else
+  {
+    WIZCHIP_WRITE_BUF(dst_ptr, wizdata, len);
+  }
+
+  ptr += len;
+
+  setSn_TX_WR(sn, ptr);
+}
 
 
 /*##########################################################################################################*/
@@ -1464,7 +1617,15 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-
+  if(htim->Instance == TIM6) {
+  	  wizDHCPticks++;
+  	  //printf("TIM6 callback ==== %d \r\n", wizDHCPticks);
+  	  if(wizDHCPticks >= 1000)
+  	  {
+  		  wizDHCPticks = 0;
+  		  DHCP_time_handler();
+  	  }
+  }
   /* USER CODE END Callback 1 */
 }
 

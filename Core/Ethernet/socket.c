@@ -331,14 +331,6 @@ int32_t send(uint8_t sn, uint8_t * buf, uint16_t len)
          setSn_IR(sn, Sn_IR_SENDOK);
          //M20150401 : Typing Error
          //#if _WZICHIP_ == 5200
-         #if _WIZCHIP_ == 5200
-            if(getSn_TX_RD(sn) != sock_next_rd[sn])
-            {
-               setSn_CR(sn,Sn_CR_SEND);
-               while(getSn_CR(sn));
-               return SOCK_BUSY;
-            }
-         #endif
          sock_is_sending &= ~(1<<sn);         
       }
       else if(tmp & Sn_IR_TIMEOUT)
@@ -363,13 +355,6 @@ int32_t send(uint8_t sn, uint8_t * buf, uint16_t len)
       if(len <= freesize) break;
    }
    wiz_send_data(sn, buf, len);
-   #if _WIZCHIP_ == 5200
-      sock_next_rd[sn] = getSn_TX_RD(sn) + len;
-   #endif
-
-   #if _WIZCHIP_ == 5300
-      setSn_TX_WRSR(sn,len);
-   #endif
    
    setSn_CR(sn,Sn_CR_SEND);
    /* wait to process the command... */

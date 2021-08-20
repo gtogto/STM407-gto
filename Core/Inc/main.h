@@ -63,6 +63,23 @@ void Error_Handler(void);
 #define __DEF_IINCHIP_BUS__ __DEF_IINCHIP_SPI_MODE__ /*Enable SPI_mode*/
 #define enable()  __asm__ __volatile__ ("sei" ::)
 #define disable() __asm__ __volatile__ ("cli" ::)
+
+void cs_sel();
+void cs_desel();
+uint8_t spi_rb(void);
+void spi_wb(uint8_t b);
+
+typedef struct _DESTINATION_SETUP
+{
+	uint16_t port;
+	uint8_t destip[4];
+}DESTINATION_SETUP;
+
+extern uint16_t sys_tick_cnt;
+#define DATA_BUF_SIZE   2048
+#define MAX_SOCK_NUM		8	/**< Maxmium number of socket  */
+#define tick_second 1
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
