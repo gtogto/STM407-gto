@@ -52,6 +52,8 @@
 #define _WIZCHIP_IO_TXBUF_ (0x4000) /* Internal Tx buffer address of the iinchip */
 #define _WIZCHIP_IO_RXBUF_ (0x6000) /* Internal Rx buffer address of the iinchip */
 
+//gto
+#define _W5100_SPI_WRITE_			   (0x01 << 2) //< SPI interface Write operation in Control Phase
 
 #define WIZCHIP_CREG_BLOCK      	      0x00   ///< Common register block
 #define WIZCHIP_SREG_BLOCK(N)    	   (_WIZCHIP_SN_BASE_+ _WIZCHIP_SN_SIZE_*N) ///< Socket N register block

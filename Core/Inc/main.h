@@ -81,6 +81,35 @@ typedef struct _DESTINATION_SETUP
 #define MAX_SOCK_NUM		8	/**< Maxmium number of socket  */
 #define tick_second 1
 
+// uart
+uint8_t uart1_key_Flag;
+uint8_t uart2_key_Flag;
+uint8_t uart_6_flag;
+
+// state machine
+#define   START_CODE	 	'['
+#define   END_CODE		 	']'
+#define   START				1
+#define   PAYLOAD 			2
+#define   END    			3
+#define   LENGTH   			35
+uint8_t   rxd[40];
+uint8_t   status;
+uint8_t   rx_cnt;
+uint8_t   rxdata;
+
+#define   GTO_START_CODE	 	'('
+#define   GTO_END_CODE		 	')'
+#define   GTO_START				1
+#define   GTO_PAYLOAD 			2
+#define   GTO_END    			3
+#define   GTO_LENGTH   			11
+uint8_t   GTO_rxd[40];
+uint8_t   GTO_status;
+uint8_t   GTO_rx_cnt;
+uint8_t   GTO_rxdata;
+
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

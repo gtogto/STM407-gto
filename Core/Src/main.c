@@ -32,6 +32,12 @@
 #include "wizchip_conf.h"		//gto
 #include "socket.h"				//gto
 
+//gto make
+#include "spi_handler.h"
+#include "uart.h"
+#include "gpio.h"
+
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,17 +57,19 @@
 /* Private variables ---------------------------------------------------------*/
 RTC_HandleTypeDef hrtc;
 
-SPI_HandleTypeDef hspi1;
+//SPI_HandleTypeDef hspi1;
 DMA_HandleTypeDef hdma_spi1_tx;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim7;
 
+/*
 UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart6;
+*/
 
 /* USER CODE BEGIN PV */
 
@@ -69,14 +77,14 @@ UART_HandleTypeDef huart6;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MX_GPIO_Init(void);
+//static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_USART2_UART_Init(void);
-static void MX_USART1_UART_Init(void);
-static void MX_UART4_Init(void);
-static void MX_UART5_Init(void);
-static void MX_USART6_UART_Init(void);
-static void MX_SPI1_Init(void);
+//static void MX_USART2_UART_Init(void);
+//static void MX_USART1_UART_Init(void);
+//static void MX_UART4_Init(void);
+//static void MX_UART5_Init(void);
+//static void MX_USART6_UART_Init(void);
+//static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM7_Init(void);
 static void MX_RTC_Init(void);
@@ -126,8 +134,7 @@ uint8_t uart6_Signal = 0x11;
 
 uint8_t from105_00[5] = "10500";
 uint8_t rx_data;
-uint8_t uart1_key_Flag = 0;
-uint8_t uart2_key_Flag = 0;
+
 
 uint8_t etherNet_Flag = 0;
 
@@ -142,31 +149,9 @@ uint8_t recv_cnt = 0;
 char master_Name[2];
 
 
-#define   START_CODE	 	'['
-#define   END_CODE		 	']'
-#define   START				1
-#define   PAYLOAD 			2
-#define   END    			3
-#define   LENGTH   			35
-uint8_t   rxd[40];
-uint8_t   status = START;
-uint8_t   rx_cnt;
-uint8_t   rxdata;
+//uint8_t   data_receive_flag = 0;
 
-#define   GTO_START_CODE	 	'('
-#define   GTO_END_CODE		 	')'
-#define   GTO_START				1
-#define   GTO_PAYLOAD 			2
-#define   GTO_END    			3
-#define   GTO_LENGTH   			11
-uint8_t   GTO_rxd[40];
-uint8_t   GTO_status = GTO_START;
-uint8_t   GTO_rx_cnt;
-uint8_t   GTO_rxdata;
-
-uint8_t   data_receive_flag = 0;
-
-uint8_t   uart_6_flag = 0;
+//uint8_t   uart_6_flag = 0;
 
 char 	compare_CMD[28] = "[FID=XX SLAVE ANCHOR DEVICE]";
 char* 	reset_CMD;
@@ -220,6 +205,8 @@ char* 	reset_CMD;
   HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), 100);															\
 } while(0)
 
+void loopback_tcpc(SOCKET s, uint16_t port);
+
 char msg[60];
 
 void cs_sel() {
@@ -250,7 +237,7 @@ uint8_t bufSize[] = {2, 2, 2, 2};
 
 int32_t loopback_tcps(uint8_t, uint8_t*, uint16_t);		// Loopback TCP server
 
-static uint8_t buff_size[] = { 2, 2, 2, 2 };
+//static uint8_t buff_size[] = { 2, 2, 2, 2 };
 #define Sn_IMR(N)          (_W5100_IO_BASE_ + (0x002C << 8) + (WIZCHIP_SREG_BLOCK(N) << 3))
 #define setSn_IMR(sn, imr) \
 		WIZCHIP_WRITE(Sn_IMR(sn), (imr & 0x1F))1
@@ -279,109 +266,7 @@ wiz_NetInfo gWIZNETINFO;
 
 DMA_InitTypeDef  DMA_InitStructure;
 
-/*##########################################################################################################*/
 
-/*uart interrupt test*/ //gto
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-	if (huart->Instance == USART1) {
-			//debugPrintln(&huart1, "uart1 interrupt! ");
-	        // When one data is received, an interrupt is generated.
-
-			HAL_UART_Receive_IT(&huart1, &rx_data, 1);
-
-	        // Send the received data.
-
-			HAL_UART_Transmit(&huart1, &rx_data, 1, 10);
-
-			uart1_key_Flag = 1;
-
-	}
-
-	if (huart->Instance == USART2) {
-		//uart2_key_Flag = 1;
-		//debugPrintln(&huart1, "uart2 interrupt! ");
-		HAL_UART_Receive_IT(&huart2, (uint8_t *) &rxdata, 1);
-
-		switch(status){
-
-		    case START:
-		        if( rxdata == START_CODE ) {
-		            rxd[0] = START_CODE ;
-		            rx_cnt = 1 ;
-		            status = PAYLOAD ;
-		            uart2_key_Flag = 0 ;
-		        }
-		        break ;
-
-		    case PAYLOAD :
-		        if( rxdata == START_CODE ) {
-		            rxd[0] = START_CODE ;
-		            rx_cnt = 1 ;
-		            status = PAYLOAD ;
-		        }
-		        else if( rxdata == END_CODE ) {
-		            if( rx_cnt == (LENGTH-1) )  {
-		                rxd[rx_cnt++] = rxdata ;
-		                uart2_key_Flag = 1 ;
-		            }
-		            status = START ;
-		        }
-		        else{
-		            if( rx_cnt < (LENGTH+2) )  rxd[rx_cnt++] = rxdata ;
-		            else {
-		                status = START ;
-		                rx_cnt = 0 ;
-		                uart2_key_Flag = 0 ;
-		            }
-		        }
-		        break ;
-		}
-	}
-
-	if (huart->Instance == USART6) {
-
-		//uart_6_flag = 1;
-
-		HAL_UART_Receive_IT(&huart6, (uint8_t *) &GTO_rxdata, 1);
-
-		switch(GTO_status){
-
-				case GTO_START:
-					if( GTO_rxdata == GTO_START_CODE ) {
-						GTO_rxd[0] = GTO_START_CODE ;
-						GTO_rx_cnt = 1 ;
-						GTO_status = GTO_PAYLOAD ;
-						uart_6_flag = 0 ;
-					}
-					break ;
-
-				case GTO_PAYLOAD :
-					if( GTO_rxdata == GTO_START_CODE ) {
-						GTO_rxd[0] = GTO_START_CODE ;
-						GTO_rx_cnt = 1 ;
-						GTO_status = GTO_PAYLOAD ;
-					}
-					else if( GTO_rxdata == GTO_END_CODE ) {
-						if( GTO_rx_cnt == (GTO_LENGTH-1) )  {
-							GTO_rxd[GTO_rx_cnt++] = GTO_rxdata ;
-							uart_6_flag = 1 ;
-						}
-						GTO_status = GTO_START ;
-					}
-					else{
-						if( GTO_rx_cnt < (GTO_LENGTH+2) )  GTO_rxd[GTO_rx_cnt++] = GTO_rxdata ;
-						else {
-							GTO_status = GTO_START ;
-							GTO_rx_cnt = 0 ;
-							uart_6_flag = 0 ;
-						}
-					}
-					break ;
-		}
-
-	}
-}
-/*##########################################################################################################*/
 
 /*##########################################################################################################*/
 //External Interrupt
@@ -450,15 +335,20 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_USART2_UART_Init();
-  MX_USART1_UART_Init();
-  MX_UART4_Init();
-  MX_UART5_Init();
-  MX_USART6_UART_Init();
+
   MX_SPI1_Init();
+
+  MX_DMA_Init();
+
+  MX_USART1_UART_Init();
+  MX_USART2_UART_Init();
+  MX_UART5_Init();
+  MX_UART4_Init();
+  MX_USART6_UART_Init();
+
   MX_TIM1_Init();
   MX_TIM7_Init();
+
   MX_RTC_Init();
 
   /* Initialize interrupts */
@@ -468,7 +358,7 @@ int main(void)
   /*##########################################################################################################*/
   /*START DEBUGGING MESSAGE*/
 
-  printf("\r\n * Start STM32F407 for Master Anchor - 20210818 GTO * \r\n\n");
+  printf("\r\n * Start STM32F407 for Master Anchor - 20210825 GTO * \r\n\n");
   printf(" =============== 1. UART and 4Mbps test Okay (USART 1, 2, 3, 4, 5, 6) \r\n");
   printf(" =============== 2. GPIO test Okay \r\n");
   printf(" =============== 3. SPI and EXTI test Okay (for Ethernet) \r\n");
@@ -563,9 +453,11 @@ int main(void)
 
   do
   {
-	  if(ctlwizchip(CW_GET_PHYLINK, (void*)&tmp) == -1)
+	  if(ctlwizchip(CW_GET_PHYLINK, (void*)&tmp) == -1){
 		  DWT_Delay_us(10);
 		  printf("Unknown PHY Link stauts.\r\n");
+	  }
+
   }while(tmp == PHY_LINK_OFF);
 
 
@@ -847,64 +739,6 @@ static void MX_RTC_Init(void)
 }
 
 /**
-  * @brief SPI1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI1_Init(void)
-{
-
-  /* USER CODE BEGIN SPI1_Init 0 */
-
-  /* USER CODE END SPI1_Init 0 */
-
-  /* USER CODE BEGIN SPI1_Init 1 */
-
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI1_Init 2 */
-  /*Configure GPIO pins : PC1 PC3 PC4 */
-  /**SPI2 GPIO Configuration
-	PB4     ------> SPI1_SCK
-	PB6     ------> SPI1_MISO
-	PB7     ------> SPI1_MOSI
-  */
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-  GPIO_InitStruct.Pin = GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  GPIO_InitStruct.Pin = GPIO_PIN_4;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /* USER CODE END SPI1_Init 2 */
-
-}
-
-/**
   * @brief TIM1 Initialization Function
   * @param None
   * @retval None
@@ -1000,177 +834,22 @@ static void MX_TIM7_Init(void)
   * @param None
   * @retval None
   */
-static void MX_UART4_Init(void)
-{
 
-  /* USER CODE BEGIN UART4_Init 0 */
-
-  /* USER CODE END UART4_Init 0 */
-
-  /* USER CODE BEGIN UART4_Init 1 */
-
-  /* USER CODE END UART4_Init 1 */
-  huart4.Instance = UART4;
-  huart4.Init.BaudRate = 115200;
-  huart4.Init.WordLength = UART_WORDLENGTH_8B;
-  huart4.Init.StopBits = UART_STOPBITS_1;
-  huart4.Init.Parity = UART_PARITY_NONE;
-  huart4.Init.Mode = UART_MODE_TX_RX;
-  huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart4.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN UART4_Init 2 */
-
-  /* USER CODE END UART4_Init 2 */
-
-}
 
 /**
   * @brief UART5 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_UART5_Init(void)
-{
 
-  /* USER CODE BEGIN UART5_Init 0 */
 
-  /* USER CODE END UART5_Init 0 */
-
-  /* USER CODE BEGIN UART5_Init 1 */
-
-  /* USER CODE END UART5_Init 1 */
-  huart5.Instance = UART5;
-  huart5.Init.BaudRate = 115200;
-  huart5.Init.WordLength = UART_WORDLENGTH_8B;
-  huart5.Init.StopBits = UART_STOPBITS_1;
-  huart5.Init.Parity = UART_PARITY_NONE;
-  huart5.Init.Mode = UART_MODE_TX_RX;
-  huart5.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart5.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart5) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN UART5_Init 2 */
-
-  /* USER CODE END UART5_Init 2 */
-
-}
-
-/**
-  * @brief USART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART1_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART1_Init 0 */
-
-  /* USER CODE END USART1_Init 0 */
-
-  /* USER CODE BEGIN USART1_Init 1 */
-
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART1_Init 2 */
-
-  /* USER CODE END USART1_Init 2 */
-
-}
-
-/**
-  * @brief USART2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART2_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART2_Init 0 */
-
-  /* USER CODE END USART2_Init 0 */
-
-  /* USER CODE BEGIN USART2_Init 1 */
-
-  /* USER CODE END USART2_Init 1 */
-  huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
-  huart2.Init.WordLength = UART_WORDLENGTH_8B;
-  huart2.Init.StopBits = UART_STOPBITS_1;
-  huart2.Init.Parity = UART_PARITY_NONE;
-  huart2.Init.Mode = UART_MODE_TX_RX;
-  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART2_Init 2 */
-
-  /* USER CODE END USART2_Init 2 */
-
-}
 
 /**
   * @brief USART6 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_USART6_UART_Init(void)
-{
 
-  /* USER CODE BEGIN USART6_Init 0 */
-
-  /* USER CODE END USART6_Init 0 */
-
-  /* USER CODE BEGIN USART6_Init 1 */
-#if 0
-  /* USER CODE END USART6_Init 1 */
-  huart6.Instance = USART6;
-  huart6.Init.BaudRate = 115200;
-  huart6.Init.WordLength = UART_WORDLENGTH_8B;
-  huart6.Init.StopBits = UART_STOPBITS_1;
-  huart6.Init.Parity = UART_PARITY_NONE;
-  huart6.Init.Mode = UART_MODE_TX_RX;
-  huart6.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart6.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart6) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART6_Init 2 */
-#endif
-  huart6.Instance = USART6;
-  huart6.Init.BaudRate = 4000000;	//4mbps //115200;
-  huart6.Init.WordLength = UART_WORDLENGTH_8B;
-  huart6.Init.StopBits = UART_STOPBITS_1;
-  huart6.Init.Parity = UART_PARITY_NONE;
-  huart6.Init.Mode = UART_MODE_TX_RX;
-  huart6.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart6.Init.OverSampling = UART_OVERSAMPLING_8;	//UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart6) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE END USART6_Init 2 */
-
-}
 
 /**
   * Enable DMA controller clock
@@ -1188,83 +867,6 @@ static void MX_DMA_Init(void)
 
 }
 
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_GPIO_Init(void)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOH_CLK_ENABLE();
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOE_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10|GPIO_PIN_11|GPIO_PIN_4|GPIO_PIN_5
-                          |GPIO_PIN_9, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_0, GPIO_PIN_RESET);
-
-  /*Configure GPIO pins : PC1 PC3 PC4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PE7 */
-  GPIO_InitStruct.Pin = GPIO_PIN_7;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PB10 PB11 PB4 PB5
-                           PB9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_10|GPIO_PIN_11|GPIO_PIN_4|GPIO_PIN_5
-                          |GPIO_PIN_9;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PB12 PB13 PB14 PB15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PA15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_15;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : PE0 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
-
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
-
-}
 
 /* USER CODE BEGIN 4 */
 /*##########################################################################################################*/

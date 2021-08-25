@@ -42,6 +42,9 @@
 #include "stm32f4xx_hal.h"
 extern SPI_HandleTypeDef hspi1;
 
+//gto
+#define _W5100_SPI_VDM_OP_          0x00
+
 #if   (_WIZCHIP_ == 5100)
 /**
 @brief  This function writes the data into W5200 registers.
@@ -123,6 +126,7 @@ uint8_t  WIZCHIP_READ(uint32_t AddrSel)
 */ 
 void     WIZCHIP_WRITE_BUF(uint32_t AddrSel, uint8_t* pBuf, uint16_t len)
 {
+
    uint16_t i = 0;
    //uint8_t h = 0xF0;
    //uint8_t aa, ah;
@@ -146,6 +150,43 @@ void     WIZCHIP_WRITE_BUF(uint32_t AddrSel, uint8_t* pBuf, uint16_t len)
   	 //WIZCHIP.CS._deselect();
 
   }
+
+
+	/*
+	uint8_t spi_data[3];
+	uint16_t i;
+
+	WIZCHIP_CRITICAL_ENTER();
+	WIZCHIP.CS._select();
+
+#if( (_WIZCHIP_IO_MODE_ & _WIZCHIP_IO_MODE_SPI_))
+	AddrSel |= (_W5100_SPI_WRITE_ | _W5100_SPI_VDM_OP_);
+
+	if(!WIZCHIP.IF.SPI._write_burst) 	// byte operation
+	{
+		for(i = 0; i < len; i++)
+		{
+			WIZCHIP.CS._select();
+			WIZCHIP.IF.SPI._write_byte((((uint16_t)(AddrSel+i)) & 0x00FF0000) >> 16);
+			WIZCHIP.IF.SPI._write_byte((((uint16_t)(AddrSel+i)) & 0x0000FF00) >>  8);
+			WIZCHIP.IF.SPI._write_byte((((uint16_t)(AddrSel+i)) & 0x000000FF) >>  0);
+					//for(i = 0; i < len; i++) {
+			WIZCHIP.IF.SPI._write_byte(pBuf[i]);
+			WIZCHIP.CS._deselect();
+		}
+
+		//}
+
+	}
+	else									// burst operation
+	{
+		spi_data[0] = (AddrSel & 0x00FF0000) >> 16;
+		spi_data[1] = (AddrSel & 0x0000FF00) >> 8;
+		spi_data[2] = (AddrSel & 0x000000FF) >> 0;
+		WIZCHIP.IF.SPI._write_burst(spi_data, 3);
+		WIZCHIP.IF.SPI._write_burst(pBuf, len);
+	}*/
+
 #elif ( (_WIZCHIP_IO_MODE_ == _WIZCHIP_IO_MODE_BUS_DIR_) )
    for(i = 0; i < len; i++)
    //M20150601 : Rename the function for integrating with ioLibrary  
@@ -199,6 +240,7 @@ void     WIZCHIP_READ_BUF (uint32_t AddrSel, uint8_t* pBuf, uint16_t len)
      //M20160715 : Depricated "M20150601 : Remove _select() to top-side"
 	  WIZCHIP.CS._deselect();
    }
+
 #elif ( (_WIZCHIP_IO_MODE_ == _WIZCHIP_IO_MODE_BUS_DIR_) )
    for(i = 0 ; i < len; i++)
    //M20150601 : Rename the function for integrating with ioLibrary  
