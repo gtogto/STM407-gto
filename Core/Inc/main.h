@@ -60,6 +60,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 /* USER CODE BEGIN Private defines */
 // Enter interrupt
+#define __TCP_CLIENT__		//Client mode
+//#define __TCP_SERVER__	//server mode
 #define __DEF_IINCHIP_BUS__ __DEF_IINCHIP_SPI_MODE__ /*Enable SPI_mode*/
 #define enable()  __asm__ __volatile__ ("sei" ::)
 #define disable() __asm__ __volatile__ ("cli" ::)
@@ -75,7 +77,6 @@ typedef struct _DESTINATION_SETUP
 	uint8_t destip[4];
 }DESTINATION_SETUP;
 
-extern uint16_t sys_tick_cnt;
 #define DATA_BUF_SIZE   2048
 #define MAX_SOCK_NUM		8	/**< Maxmium number of socket  */
 #define tick_second 1

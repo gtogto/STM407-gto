@@ -53,7 +53,6 @@ RTC_HandleTypeDef hrtc;
 
 SPI_HandleTypeDef hspi1;
 DMA_HandleTypeDef hdma_spi1_tx;
-DMA_HandleTypeDef hdma_spi1_rx;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim7;
@@ -62,7 +61,6 @@ UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
-UART_HandleTypeDef huart3;
 UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
@@ -81,7 +79,6 @@ static void MX_USART6_UART_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM7_Init(void);
-static void MX_USART3_UART_Init(void);
 static void MX_RTC_Init(void);
 static void MX_NVIC_Init(void);
 /* USER CODE BEGIN PFP */
@@ -120,6 +117,7 @@ uint8_t start_data[17] = "START 32F407 \r\n";
 uint8_t tx_data[10] = "recvD\r\n";
 uint8_t rx_data5[10] = "uart5\r\n";
 uint8_t rx_data4[10] = "uart4\r\n";
+uint8_t dma_tx[10] = "hello gto ";
 uint8_t data[1] = "S";
 uint8_t sync_Signal = 0xff;
 uint8_t test = 0x11;
@@ -260,16 +258,26 @@ static uint8_t buff_size[] = { 2, 2, 2, 2 };
 uint32_t	ret;
 uint16_t	size = 0, sentsize = 0;
 
-uint8_t c_buffer[8];		//client sends 8 bytes
-void wiz_send_data_gto(uint8_t sn, uint8_t *wizdata, uint16_t len);
+uint8_t c_buffer[2048];		//client sends 8 bytes
+uint8_t test_100[100] = "gtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogtogto1234567890";
+
 
 uint8_t ah, as;
 static uint16_t wizDHCPticks = 0;
 
+#define DMA_BUF_SIZE   2048
+uint8_t TX_Buffer[5];
+
 DESTINATION_SETUP Destination_Setup;
 uint8_t gDATABUF[DATA_BUF_SIZE];
 uint8_t TX_BUF[DATA_BUF_SIZE]; // TX Buffer for applications
-uint8_t ch_status[MAX_SOCK_NUM] = { 0, };	/** 0:close, 1:ready, 2:connected */
+uint8_t ch_status[MAX_SOCK_NUM] = { 0, };	// 0:close, 1:ready, 2:connected
+uint16_t sys_tick_cnt;
+wiz_NetInfo gWIZNETINFO;
+/*##########################################################################################################*/
+//for SPI DMA
+
+DMA_InitTypeDef  DMA_InitStructure;
 
 /*##########################################################################################################*/
 
@@ -451,7 +459,6 @@ int main(void)
   MX_SPI1_Init();
   MX_TIM1_Init();
   MX_TIM7_Init();
-  MX_USART3_UART_Init();
   MX_RTC_Init();
 
   /* Initialize interrupts */
@@ -499,7 +506,9 @@ int main(void)
   //HAL_GPIO_WritePin(GPIOE, GPIO_PIN_7, 1);	// Ethernet Extra Interrupt Enable
 
   reg_wizchip_cs_cbfunc(cs_sel, cs_desel);
+
   reg_wizchip_spi_cbfunc(spi_rb, spi_wb);
+
 
   wizchip_init(bufSize, bufSize);
   /*
@@ -508,7 +517,9 @@ int main(void)
 						  .sn 	= {255, 255, 255, 0},					// Subnet mask
 						  .gw 	= {192, 168, 2, 1}};					// Gateway address
   */
-  wiz_NetInfo netInfo = { .mac 	= {0x00, 0x08, 0xdc, 0xab, 0xcd, 0xef},	// Mac address
+
+
+  wiz_NetInfo netInfo = { .mac 	= {0x59, 0x08, 0xdc, 0xab, 0xcd, 0xef},	// Mac address
  		  	  	  	  	  .ip 	= {10, 0, 7, 211},						// IP address
  						  .sn 	= {255, 255, 248, 0},					// Subnet mask
  						  .gw 	= {10, 0, 0, 1}};						// Gateway address
@@ -516,6 +527,14 @@ int main(void)
   wizchip_setnetinfo(&netInfo);
   wizchip_getnetinfo(&netInfo);
   PRINT_NETINFO(netInfo);
+
+  // target server ip set
+  Destination_Setup.destip[0] = 10; Destination_Setup.destip[1] = 0; Destination_Setup.destip[2] = 0; Destination_Setup.destip[3] = 87;
+  // target server port set
+  Destination_Setup.port = 60500;
+
+  //HAL_SPI_Transmit_DMA(&hspi1, DMA_BUF_SIZE, 1); //Transmit DMA Enable
+  //HAL_SPI_Receive_DMA(&hspi1, DMA_BUF_SIZE, 1);  //Receive DMA Enable
 
 
   /*##########################################################################################################*/
@@ -529,12 +548,36 @@ int main(void)
   //HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, 1); // GPIO PC1 OUTPUT HIGH -> tx enable
   //HAL_GPIO_WritePin(GPIOC, E_RST, 0);
 
+  uint8_t tmp;
+  uint8_t memsize[2][8] = {{2,2,2,2,2,2,2,2},{2,2,2,2,2,2,2,2}};
+
+  /* WIZCHIP SOCKET Buffer initialize */
+  if(ctlwizchip(CW_INIT_WIZCHIP,(void*)memsize) == -1)
+  {
+	  printf("WIZCHIP Initialized fail.\r\n");
+	  DWT_Delay_us(10);
+	  while(1);
+  }
+
+  /* PHY link status check */
+
+  do
+  {
+	  if(ctlwizchip(CW_GET_PHYLINK, (void*)&tmp) == -1)
+		  DWT_Delay_us(10);
+		  printf("Unknown PHY Link stauts.\r\n");
+  }while(tmp == PHY_LINK_OFF);
+
+
   while (1)
   {
+
 	  //DWT_Delay_us(1000);											// 10 microsecond
 	  //HAL_UART_Transmit(&huart6, (uint8_t *) &test, 1, 10);		//4mbps test
 
-	  loopback_tcps(SOCK_TCPS, 20, 60500);
+	  //loopback_tcps(SOCK_TCPS, 20, 60500);
+	  loopback_tcpc(1, 60500);
+	  DWT_Delay_us(1000);
 
 	  //setIMR(0x01);
 	  //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
@@ -588,14 +631,30 @@ int main(void)
 				  //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
 
 				  //HAL_SPI_Transmit(&hspi1, (uint8_t *)"GTO", 3, 100);
-
+				  /*
 				  if (etherNet_Flag){
 					  etherNet_Flag = 0;
 					  //setSn_IMR(0, 0xff);	//Interrupt occurs only in the recv interrupt of socket '0'.
 					  if((retVal = send(SOCK_TCPS, GREETING_MSG, strlen(GREETING_MSG))) == (int16_t)strlen(GREETING_MSG)) {
 						  printf("######### 407 board transmits data to server !! \r\n");
 					  }
+				  }*/
+				  /*
+				  for(int j = 0; j <100; j++ ){
+
+					  for (int i = 0; i < 100; i++){
+						  //send(SOCK_TCPS, test_100, 100);
+						  while(!(USART1->SR & 0x80)){}
+						  USART1->DR=test_100[i];
+					  }
+					  printf("\r\n");
 				  }
+
+				  printf("----------------------------- for loop end \r\n");
+				  */
+				  send(0, test_100, 100);
+
+
 				  break;
 		  }
 	  }
@@ -809,7 +868,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
   hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
@@ -1069,39 +1128,6 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
-  * @brief USART3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART3_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART3_Init 0 */
-
-  /* USER CODE END USART3_Init 0 */
-
-  /* USER CODE BEGIN USART3_Init 1 */
-
-  /* USER CODE END USART3_Init 1 */
-  huart3.Instance = USART3;
-  huart3.Init.BaudRate = 115200;
-  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-  huart3.Init.StopBits = UART_STOPBITS_1;
-  huart3.Init.Parity = UART_PARITY_NONE;
-  huart3.Init.Mode = UART_MODE_TX_RX;
-  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART3_Init 2 */
-
-  /* USER CODE END USART3_Init 2 */
-
-}
-
-/**
   * @brief USART6 Initialization Function
   * @param None
   * @retval None
@@ -1156,9 +1182,6 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA2_CLK_ENABLE();
 
   /* DMA interrupt init */
-  /* DMA2_Stream0_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
   /* DMA2_Stream3_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
@@ -1186,10 +1209,11 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1|GPIO_PIN_3|GPIO_PIN_4, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10|GPIO_PIN_11|GPIO_PIN_4|GPIO_PIN_5
+                          |GPIO_PIN_9, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_9, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOE, GPIO_PIN_0, GPIO_PIN_RESET);
@@ -1207,6 +1231,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : PB10 PB11 PB4 PB5
+                           PB9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_10|GPIO_PIN_11|GPIO_PIN_4|GPIO_PIN_5
+                          |GPIO_PIN_9;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
   /*Configure GPIO pins : PB12 PB13 PB14 PB15 */
   GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -1219,13 +1252,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PB4 PB5 PB9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_9;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PE0 */
   GPIO_InitStruct.Pin = GPIO_PIN_0;
@@ -1242,121 +1268,81 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 /*##########################################################################################################*/
-/*gto*/
-/* Synchronization Function */
-
-void Sync_out(){
-	// sync signal
-	HAL_GPIO_WritePin(GPIOB, GPIO_A, 1);							// GPIO PB5 OUTPUT HIGH -> USART6 enable
-	HAL_GPIO_WritePin(GPIOE, SYNC_GEN, 1);							// GPIO PE0 OUTPUT High -> SYNC_GEN
-	HAL_GPIO_WritePin(GPIOC, TX_EN, 1);								// GPIO PC1 OUTPUT HIGH -> tx enable
-	HAL_UART_Transmit(&huart6, (uint8_t *) &sync_Signal, 1, 10);	// send data(0xff)
-	DWT_Delay_us(100);												// 10 microsecond
-	HAL_GPIO_WritePin(GPIOC, TX_EN, 0);								// GPIO PC1 OUTPUT LOW -> tx enable
-	HAL_GPIO_WritePin(GPIOE, SYNC_GEN, 0);							// GPIO PE0 OUTPUT LOW -> SYNC_GEN
-}
-/*##########################################################################################################*/
-
-/*##########################################################################################################*/
-/*gto*/
-/* make a Substring function */
-
-char *SubStr( char *pnInput, int nStart, int nLen )
+/*TCP Client*/
+#ifdef __TCP_CLIENT__
+void loopback_tcpc(SOCKET s, uint16_t port)
 {
-    int nLoop ;
-    int nLength ;
-    char *pszOutPut ;
+   uint16_t RSR_len;
+   uint16_t received_len;
+   uint16_t any_port = 60500;
+   uint8_t * data_buf = TX_BUF;
+   //printf("socket client -> %d \r\n", s);
 
-    if( pnInput == NULL ){
-        return NULL ;
-    }
-    pszOutPut = (char *)malloc( sizeof(char) * nLen + 1 ) ;
-    nLength = strlen( pnInput ) ;
-    if( nLength > nStart + nLen ){
-        nLength = nStart + nLen ;
-    }
-    for( nLoop = nStart ; nLoop < nLength ; nLoop++ ){
-        pszOutPut[nLoop-nStart] = pnInput[nLoop] ;
-    }
-    pszOutPut[nLoop - nStart] = '\0' ;
-    return pszOutPut ;
-}
-/*##########################################################################################################*/
-void TCP_Ethernet_Server(void){
-	printf("\r\n EHTERNET RUNNING .... 20210817 \r\n");
+   switch (getSn_SR(s))
+   {
+   	   	//printf("socket client -> %d \r\n", s);
+		case SOCK_ESTABLISHED:                 /* if connection is established */
+				  if(ch_status[s]==1)
+				  {
+					 printf("%d : Server IP : %d.%d.%d.%d , Port : %d  Connect \r\n", s,
+							 Destination_Setup.destip[0],Destination_Setup.destip[1],Destination_Setup.destip[2],Destination_Setup.destip[3],Destination_Setup.port);
+					 //printf("\r\n%d : Server IP : %d.%d.%d.%d  , Port : %d  Connected",s, 10, 0, 0 , 87, 60500);
+					 ch_status[s] = 2;
+				  }
 
-	/* Open socket 0 as TCP_SOCKET with port 60500 */
-	if((retVal = socket(0, Sn_MR_TCP, PORT, 0)) == 0) {
-		/* Put socket in LISTEN mode. This means we are creating a TCP server */
-		if((retVal = listen(0)) == SOCK_OK) {
-			printf("######### SOCKET READY !! \r\n");
-			/* While socket is in LISTEN mode we wait for a remote connection */
-			while((sockStatus = getSn_SR(0)) == SOCK_LISTEN)
-				//printf("SOCK LISTENNING ... !! \r\n");
-				HAL_Delay(100);
-			/* OK. Got a remote peer. Let's send a message to it */
-				while(1) {
-	  			  /* If connection is ESTABLISHED with remote peer */
-	  			  if((sockStatus = getSn_SR(0)) == SOCK_ESTABLISHED) {
-	  				  printf("######### SOCK_ESTABLISHED !! \r\n");
-	  				  uint8_t remoteIP[4];
-	  				  uint16_t remotePort;
+				  if ((RSR_len = getSn_RX_RSR(s)) > 0)         /* check Rx data */
+				  {
+					 if (RSR_len > DATA_BUF_SIZE) RSR_len = DATA_BUF_SIZE;   /* if Rx data size is lager than TX_RX_MAX_BUF_SIZE */
+																						/* the data size to read is MAX_BUF_SIZE. */
+					 received_len = recv(s, data_buf, RSR_len);         /* read the received data */
+					 send(s, data_buf, received_len);         /* sent the received data */
 
-	  				  /* Retrieving remote peer IP and port number */
-	  				  getsockopt(0, SO_DESTIP, remoteIP);
-	  				  getsockopt(0, SO_DESTPORT, (uint8_t*)&remotePort);
-	  				  sprintf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
-	  				  printf("====================================================== \r\n");
-	  				  printf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
-	  				  printf("====================================================== \r\n");
-	  				  PRINT_STR(msg);
+					 printf("RX : %s \r\n",data_buf);
+				  }
 
-	  				  /* Let's send a welcome message and closing socket */
-	  				  if((retVal = send(0, GREETING_MSG, strlen(GREETING_MSG))) == (int16_t)strlen(GREETING_MSG)) {
-	  					  printf("######### WELCOME MESSAGE !! \r\n");
-	  					  PRINT_STR(SENT_MESSAGE_MSG);
-	  					  //etherNet_Flag = 0;
-	  				  }
+				  break;
 
-	  				  else { /* Ops: something went wrong during data transfer */
-	  					  sprintf(msg, WRONG_RETVAL_MSG, retVal);
-	  					  printf(" Wrong MESSAGE !! \r\n");
-	  					  PRINT_STR(msg);
-	  				  }
-	  				  break;
-	  			  }
-	  			  else { /* Something went wrong with remote peer, maybe the connection was closed unexpectedly */
-	  				  sprintf(msg, WRONG_STATUS_MSG, sockStatus);
-	  				  PRINT_STR(msg);
-	  				  break;
-	  			  }
-	  		  }
+		case SOCK_CLOSE_WAIT:                                 /* If the client request to close */
+				  printf("\r\n%d : close ! \r\n", s);
+				  if ((RSR_len = getSn_RX_RSR(s)) > 0)         /* check Rx data */
+				  {
+					 if (RSR_len > DATA_BUF_SIZE) RSR_len = DATA_BUF_SIZE;   /* if Rx data size is lager than TX_RX_MAX_BUF_SIZE */
+																								/* the data size to read is MAX_BUF_SIZE. */
+					 received_len = recv(s, data_buf, RSR_len);         /* read the received data */
+				  }
+				  disconnect(s);
+				  ch_status[s] = 0;
+				  break;
 
-	  	  } else /* Ops: socket not in LISTEN mode. Something went wrong */
-	  		  PRINT_STR(LISTEN_ERR_MSG);
-	  } else { /* Can't open the socket. This means something is wrong with W5100 configuration: maybe SPI issue? */
-	  	  sprintf(msg, WRONG_RETVAL_MSG, retVal);
-	  	  PRINT_STR(msg);
-	  }
+		case SOCK_CLOSED:                                               /* if a socket is closed */
+				  if(!ch_status[s])
+				  {
+					 printf("\r\n%d : Loop-Back TCP Client Started. port: %d\r\n", s, port);
+					 ch_status[s] = 1;
+				  }
+				  if(socket(s, Sn_MR_TCP, any_port++, 0x00) == 0)    /* reinitialize the socket */
+				  {
+					 printf("\a%d : Fail to create socket.\r\n",s);
+					 ch_status[s] = 0;
+				  }
+				  break;
 
-	  /* We close the socket and start a connection again */
-	  //disconnect(0);
-	  //close(0);
-}
-/*##########################################################################################################*/
-void EthernetTest(unsigned char *pRcvBuffer, unsigned int len)
-{
-	unsigned int i;
-
-	printf("Read Data[%d]\r\n", len);
-
-	for(i=0;i<len;i++)
-	{
-		//?��?��?��?��?�� ?��?��
-		printf("%c ", pRcvBuffer[i]);
+		case SOCK_INIT:     /* if a socket is initiated */
+				  if(sys_tick_cnt == 0)
+				  {
+					  connect(s, Destination_Setup.destip, Destination_Setup.port); /* Try to connect to TCP server(Socket, DestIP, DestPort) */
+					  sys_tick_cnt = 3000;
+				  }
+				  break;
+		default:
+				  break;
 	}
 }
+#endif
 
+/*##########################################################################################################*/
+/*TCP Server*/
+#ifdef __TCP_SERVER__
 int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
 {
 	//setIMR(0x01);
@@ -1369,8 +1355,8 @@ int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
    		   break;
 
    	   case SOCK_ESTABLISHED :
-   		   setIMR(0x01);
-   		   setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
+   		   //setIMR(0x01);
+   		   //setSn_IR(0, Sn_IR_RECV);	//Interrupt occurs only in the recv interrupt of socket '0'.
 
    		   if(getSn_IR(sn) & Sn_IR_CON)
    		   {
@@ -1381,8 +1367,11 @@ int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
 		   {
 			   ret = recv(SOCK_TCPS, c_buffer, sizeof(c_buffer));
 			   //USART1->DR = c_buffer[0] ;
-			   printf(" ######### Data received from the server : %s \r\n", c_buffer);
+			   printf(" ######### Data received from the CLient : %s \r\n", c_buffer);
 			   ret = send(SOCK_TCPS, c_buffer+sentsize, size-sentsize);
+			   //HAL_SPI_Transmit_DMA(&hspi1, dma_tx, 10);
+			   //HAL_SPI_Transmit_DMA(&hspi1, c_buffer, sizeof(c_buffer));
+
 		   }
 
    		   while(size != sentsize)
@@ -1450,152 +1439,111 @@ int32_t loopback_tcps(uint8_t sn, uint8_t * buf, uint16_t port)
    }
    return 1;
 }
+#endif
+/*##########################################################################################################*/
+void TCP_Ethernet_Server(void){
+	printf("\r\n EHTERNET RUNNING .... 20210817 \r\n");
+
+	/* Open socket 0 as TCP_SOCKET with port 60500 */
+	if((retVal = socket(0, Sn_MR_TCP, PORT, 0)) == 0) {
+		/* Put socket in LISTEN mode. This means we are creating a TCP server */
+		if((retVal = listen(0)) == SOCK_OK) {
+			printf("######### SOCKET READY !! \r\n");
+			/* While socket is in LISTEN mode we wait for a remote connection */
+			while((sockStatus = getSn_SR(0)) == SOCK_LISTEN)
+				//printf("SOCK LISTENNING ... !! \r\n");
+				HAL_Delay(100);
+			/* OK. Got a remote peer. Let's send a message to it */
+				while(1) {
+	  			  /* If connection is ESTABLISHED with remote peer */
+	  			  if((sockStatus = getSn_SR(0)) == SOCK_ESTABLISHED) {
+	  				  printf("######### SOCK_ESTABLISHED !! \r\n");
+	  				  uint8_t remoteIP[4];
+	  				  uint16_t remotePort;
+
+	  				  /* Retrieving remote peer IP and port number */
+	  				  getsockopt(0, SO_DESTIP, remoteIP);
+	  				  getsockopt(0, SO_DESTPORT, (uint8_t*)&remotePort);
+	  				  sprintf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
+	  				  printf("====================================================== \r\n");
+	  				  printf(msg, CONN_ESTABLISHED_MSG, remoteIP[0], remoteIP[1], remoteIP[2], remoteIP[3], remotePort);
+	  				  printf("====================================================== \r\n");
+	  				  PRINT_STR(msg);
+
+	  				  /* Let's send a welcome message and closing socket */
+	  				  if((retVal = send(0, GREETING_MSG, strlen(GREETING_MSG))) == (int16_t)strlen(GREETING_MSG)) {
+	  					  printf("######### WELCOME MESSAGE !! \r\n");
+	  					  PRINT_STR(SENT_MESSAGE_MSG);
+	  					  //etherNet_Flag = 0;
+	  				  }
+
+	  				  else { /* Ops: something went wrong during data transfer */
+	  					  sprintf(msg, WRONG_RETVAL_MSG, retVal);
+	  					  printf(" Wrong MESSAGE !! \r\n");
+	  					  PRINT_STR(msg);
+	  				  }
+	  				  break;
+	  			  }
+	  			  else { /* Something went wrong with remote peer, maybe the connection was closed unexpectedly */
+	  				  sprintf(msg, WRONG_STATUS_MSG, sockStatus);
+	  				  PRINT_STR(msg);
+	  				  break;
+	  			  }
+	  		  }
+
+	  	  } else /* Ops: socket not in LISTEN mode. Something went wrong */
+	  		  PRINT_STR(LISTEN_ERR_MSG);
+	  } else { /* Can't open the socket. This means something is wrong with W5100 configuration: maybe SPI issue? */
+	  	  sprintf(msg, WRONG_RETVAL_MSG, retVal);
+	  	  PRINT_STR(msg);
+	  }
+
+	  /* We close the socket and start a connection again */
+	  disconnect(0);
+	  close(0);
+}
+/*##########################################################################################################*/
+/*##########################################################################################################*/
+/*gto*/
+/* Synchronization Function */
+
+void Sync_out(){
+	// sync signal
+	HAL_GPIO_WritePin(GPIOB, GPIO_A, 1);							// GPIO PB5 OUTPUT HIGH -> USART6 enable
+	HAL_GPIO_WritePin(GPIOE, SYNC_GEN, 1);							// GPIO PE0 OUTPUT High -> SYNC_GEN
+	HAL_GPIO_WritePin(GPIOC, TX_EN, 1);								// GPIO PC1 OUTPUT HIGH -> tx enable
+	HAL_UART_Transmit(&huart6, (uint8_t *) &sync_Signal, 1, 10);	// send data(0xff)
+	DWT_Delay_us(100);												// 10 microsecond
+	HAL_GPIO_WritePin(GPIOC, TX_EN, 0);								// GPIO PC1 OUTPUT LOW -> tx enable
+	HAL_GPIO_WritePin(GPIOE, SYNC_GEN, 0);							// GPIO PE0 OUTPUT LOW -> SYNC_GEN
+}
+/*##########################################################################################################*/
 
 /*##########################################################################################################*/
-void network_init(void)
+/*gto*/
+/* make a Substring function */
+
+char *SubStr( char *pnInput, int nStart, int nLen )
 {
-	uint8_t tmpstr[6];
+    int nLoop ;
+    int nLength ;
+    char *pszOutPut ;
 
-  	wiz_NetInfo gWIZNETINFO = { .mac 	= {0x00, 0x08, 0xdc, 0xab, 0xcd, 0xef},	// Mac address
-  								.ip 	= {10, 0, 7, 211},						// IP address
-								.sn 	= {255, 255, 248, 0},					// Subnet mask
-								.gw 	= {10, 0, 0, 1}};						// Gateway address
-
-	// source mac add set
-	gWIZNETINFO.mac[0] = 0x00; gWIZNETINFO.mac[1] = 0x08; gWIZNETINFO.mac[2] = 0xdc; gWIZNETINFO.mac[3] = 0x00; gWIZNETINFO.mac[4] = 0xab; gWIZNETINFO.mac[5] = 0xcd;
-	// source ip add set
-	gWIZNETINFO.ip[0] = 192; gWIZNETINFO.ip[1] = 168; gWIZNETINFO.ip[2] = 1; gWIZNETINFO.ip[3] = 2;
-	// source subnet add set
-	gWIZNETINFO.sn[0] = 255; gWIZNETINFO.sn[1] = 255; gWIZNETINFO.sn[2] = 255; gWIZNETINFO.sn[3] = 0;
-	// source gateway add set
-	gWIZNETINFO.gw[0] = 192; gWIZNETINFO.gw[1] = 168; gWIZNETINFO.gw[2] = 1; gWIZNETINFO.gw[3] = 1;
-	// source ip configuration type set
-	gWIZNETINFO.dhcp = NETINFO_STATIC;
-
-	// target server ip set
-	Destination_Setup.destip[0] = 192; Destination_Setup.destip[1] = 168; Destination_Setup.destip[2] = 1; Destination_Setup.destip[3] = 3;
-	// target server port set
-	Destination_Setup.port = 4000;
-
-	ctlnetwork(CN_SET_NETINFO, (void*)&gWIZNETINFO);
-
-	sys_tick_cnt = 100;
-	while(sys_tick_cnt);
-
-	ctlnetwork(CN_GET_NETINFO, (void*)&gWIZNETINFO);
-
-	// Display Network Information
-	ctlwizchip(CW_GET_ID,(void*)tmpstr);
-	printf("\r\n=== %x NET CONF ===\r\n",(char*)tmpstr);
-	printf("MAC: %02X:%02X:%02X:%02X:%02X:%02X\r\n",gWIZNETINFO.mac[0],gWIZNETINFO.mac[1],gWIZNETINFO.mac[2],
-		  gWIZNETINFO.mac[3],gWIZNETINFO.mac[4],gWIZNETINFO.mac[5]);
-	printf("SIP: %d.%d.%d.%d\r\n", gWIZNETINFO.ip[0],gWIZNETINFO.ip[1],gWIZNETINFO.ip[2],gWIZNETINFO.ip[3]);
-	printf("GAR: %d.%d.%d.%d\r\n", gWIZNETINFO.gw[0],gWIZNETINFO.gw[1],gWIZNETINFO.gw[2],gWIZNETINFO.gw[3]);
-	printf("SUB: %d.%d.%d.%d\r\n", gWIZNETINFO.sn[0],gWIZNETINFO.sn[1],gWIZNETINFO.sn[2],gWIZNETINFO.sn[3]);
-	printf("DNS: %d.%d.%d.%d\r\n", gWIZNETINFO.dns[0],gWIZNETINFO.dns[1],gWIZNETINFO.dns[2],gWIZNETINFO.dns[3]);
-	printf("======================\r\n");
+    if( pnInput == NULL ){
+        return NULL ;
+    }
+    pszOutPut = (char *)malloc( sizeof(char) * nLen + 1 ) ;
+    nLength = strlen( pnInput ) ;
+    if( nLength > nStart + nLen ){
+        nLength = nStart + nLen ;
+    }
+    for( nLoop = nStart ; nLoop < nLength ; nLoop++ ){
+        pszOutPut[nLoop-nStart] = pnInput[nLoop] ;
+    }
+    pszOutPut[nLoop - nStart] = '\0' ;
+    return pszOutPut ;
 }
-
-
-
-void loopback_tcpc(SOCKET s, uint16_t port)
-{
-	uint16_t RSR_len;
-	uint16_t received_len;
-	uint16_t any_port = 1000;
-	uint8_t * data_buf = TX_BUF;
-
-   switch (getSn_SR(s))
-   {
-		case SOCK_ESTABLISHED:                 /* if connection is established */
-				  if(ch_status[s]==1)
-				  {
-					 printf("\r\n%d : Server IP : %d.%d.%d.%d  , Port : %d  Connected",s,Destination_Setup.destip[0],Destination_Setup.destip[1],Destination_Setup.destip[2],Destination_Setup.destip[3],Destination_Setup.port);
-					 ch_status[s] = 2;
-				  }
-
-				  if ((RSR_len = getSn_RX_RSR(s)) > 0)         /* check Rx data */
-				  {
-					 if (RSR_len > DATA_BUF_SIZE) RSR_len = DATA_BUF_SIZE;   /* if Rx data size is lager than TX_RX_MAX_BUF_SIZE */
-																						/* the data size to read is MAX_BUF_SIZE. */
-					 received_len = recv(s, data_buf, RSR_len);         /* read the received data */
-					 send(s, data_buf, received_len);         /* sent the received data */
-
-					 printf("RX : %s \r\n",data_buf);
-				  }
-
-				  break;
-
-		case SOCK_CLOSE_WAIT:                                 /* If the client request to close */
-				  printf("\r\n%d : CLOSE_WAIT", s);
-				  if ((RSR_len = getSn_RX_RSR(s)) > 0)         /* check Rx data */
-				  {
-					 if (RSR_len > DATA_BUF_SIZE) RSR_len = DATA_BUF_SIZE;   /* if Rx data size is lager than TX_RX_MAX_BUF_SIZE */
-																								/* the data size to read is MAX_BUF_SIZE. */
-					 received_len = recv(s, data_buf, RSR_len);         /* read the received data */
-				  }
-				  disconnect(s);
-				  ch_status[s] = 0;
-				  break;
-
-		case SOCK_CLOSED:                                               /* if a socket is closed */
-				  if(!ch_status[s])
-				  {
-					 printf("\r\n%d : Loop-Back TCP Client Started. port: %d", s, port);
-					 ch_status[s] = 1;
-				  }
-				  if(socket(s, Sn_MR_TCP, any_port++, 0x00) == 0)    /* reinitialize the socket */
-				  {
-					 printf("\a%d : Fail to create socket.",s);
-					 ch_status[s] = 0;
-				  }
-				  break;
-
-		case SOCK_INIT:     /* if a socket is initiated */
-					if(sys_tick_cnt == 0)
-					{
-							connect(s, Destination_Setup.destip, Destination_Setup.port); /* Try to connect to TCP server(Socket, DestIP, DestPort) */
-							sys_tick_cnt = 3000;
-					}
-						break;
-		default:
-						break;
-	}
-}
-
 /*##########################################################################################################*/
-void wiz_send_data_gto(uint8_t sn, uint8_t *wizdata, uint16_t len)
-{
-  uint16_t ptr;
-  uint16_t size;
-  uint16_t dst_mask;
-  uint16_t dst_ptr;
-  //printf("send function \r\n");
-  ptr = getSn_TX_WR(sn);
-
-  dst_mask = ptr & getSn_TxMASK(sn);
-  dst_ptr = getSn_TxBASE(sn) + dst_mask;
-
-  if (dst_mask + len > getSn_TxMAX(sn))
-  {
-    size = getSn_TxMAX(sn) - dst_mask;
-    WIZCHIP_WRITE_BUF(dst_ptr, wizdata, size);
-    wizdata += size;
-    size = len - size;
-    dst_ptr = getSn_TxBASE(sn);
-    WIZCHIP_WRITE_BUF(dst_ptr, wizdata, size);
-  }
-  else
-  {
-    WIZCHIP_WRITE_BUF(dst_ptr, wizdata, len);
-  }
-
-  ptr += len;
-
-  setSn_TX_WR(sn, ptr);
-}
-
-
 /*##########################################################################################################*/
 
 /* USER CODE END 4 */

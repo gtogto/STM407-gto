@@ -39,6 +39,8 @@
 //*****************************************************************************
 
 #include "w5100.h"
+#include "stm32f4xx_hal.h"
+extern SPI_HandleTypeDef hspi1;
 
 #if   (_WIZCHIP_ == 5100)
 /**
@@ -111,6 +113,7 @@ uint8_t  WIZCHIP_READ(uint32_t AddrSel)
 
    WIZCHIP.CS._deselect();
    WIZCHIP_CRITICAL_EXIT();
+
    return ret;
 }
 
@@ -121,6 +124,10 @@ uint8_t  WIZCHIP_READ(uint32_t AddrSel)
 void     WIZCHIP_WRITE_BUF(uint32_t AddrSel, uint8_t* pBuf, uint16_t len)
 {
    uint16_t i = 0;
+   //uint8_t h = 0xF0;
+   //uint8_t aa, ah;
+
+   //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, 1);
 
    WIZCHIP_CRITICAL_ENTER();
    WIZCHIP.CS._select();   //M20150601 : Moved here.
@@ -128,25 +135,15 @@ void     WIZCHIP_WRITE_BUF(uint32_t AddrSel, uint8_t* pBuf, uint16_t len)
 #if( (_WIZCHIP_IO_MODE_ & _WIZCHIP_IO_MODE_SPI_))
   for(i = 0; i < len; i++)
   {
-     //M20160715 : Depricated "M20150601 : Remove _select() to top-side"
-     //            CS should be controlled every SPI frames
 
-     WIZCHIP.CS._select();
+	 WIZCHIP.CS._select();
      WIZCHIP.IF.SPI._write_byte(0xF0);
      WIZCHIP.IF.SPI._write_byte((((uint16_t)(AddrSel+i)) & 0xFF00) >>  8);
      WIZCHIP.IF.SPI._write_byte((((uint16_t)(AddrSel+i)) & 0x00FF) >>  0);
      WIZCHIP.IF.SPI._write_byte(pBuf[i]);    // Data write (write 1byte da0ta)
      //M20160715 : Depricated "M20150601 : Remove _select() to top-side"
   	 WIZCHIP.CS._deselect();
-  	 /*
-	 //gto
-	 HAL_SPI_Transmit_DMA(&hspi1, &h, 1);
-	 ah = (((uint16_t)(AddrSel+i)) & 0xFF00) >>  8;
-	 aa = (((uint16_t)(AddrSel+i)) & 0x00FF) >>  0;
-	 HAL_SPI_Transmit_DMA(&hspi1, &ah, 1);
-	 HAL_SPI_Transmit_DMA(&hspi1, &aa, 1);
-	 HAL_SPI_Transmit_DMA(&hspi1, pBuf[i], 1);    // Data write (write 1byte data)
-	*/
+  	 //WIZCHIP.CS._deselect();
 
   }
 #elif ( (_WIZCHIP_IO_MODE_ == _WIZCHIP_IO_MODE_BUS_DIR_) )
@@ -174,7 +171,7 @@ void     WIZCHIP_WRITE_BUF(uint32_t AddrSel, uint8_t* pBuf, uint16_t len)
 #else
    #error "Unknown _WIZCHIP_IO_MODE_ in W5100. !!!!"
 #endif
-   
+
    WIZCHIP.CS._deselect();  //M20150601 : Moved here.
    WIZCHIP_CRITICAL_EXIT();
 }
